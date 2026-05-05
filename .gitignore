@@ -1,0 +1,115 @@
+# Created by https://www.toptal.com/developers/gitignore/api/windows,cocoscreator,visualstudiocode
+# Edit at https://www.toptal.com/developers/gitignore?templates=windows,cocoscreator,visualstudiocode
+
+### CocosCreator ###
+#/////////////////////////////////////////////////////////////////////////////
+# Cocos Creator Projects
+
+build/
+library/
+temp/
+local/
+jsb-default/
+jsb-binary/
+jsb-link/
+web-desktop/
+web-mobile/
+runtime/
+jsb/
+export/
+
+# Logs and databases
+
+*.log
+*.sql
+*.sqlite
+
+# files for debugger
+
+*.sln
+*.csproj
+*.pidb
+*.unityproj
+*.suo
+
+# OS generated files
+
+.DS_Store
+ehthumbs.db
+Thumbs.db
+
+# exvim files
+
+*UnityVS.meta
+*.err
+*.err.meta
+*.exvim
+*.exvim.meta
+*.vimentry
+*.vimentry.meta
+*.vimproject
+*.vimproject.meta
+.vimfiles.*/
+.exvim.*/
+quick_gen_project_*_autogen.bat
+quick_gen_project_*_autogen.bat.meta
+quick_gen_project_*_autogen.sh
+quick_gen_project_*_autogen.sh.meta
+.exvim.app
+
+# webstorm files
+
+.idea/
+
+# VSCode files
+
+creator.d.ts
+.vscode/
+
+### VisualStudioCode ###
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+
+# Local History for Visual Studio Code
+.history/
+
+# Built Visual Studio Code Extensions
+*.vsix
+
+### VisualStudioCode Patch ###
+# Ignore all local history of files
+.history
+.ionide
+
+### Windows ###
+# Windows thumbnail cache files
+Thumbs.db:encryptable
+ehthumbs_vista.db
+
+# Dump file
+*.stackdump
+
+# Folder config file
+[Dd]esktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Windows Installer files
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# Windows shortcuts
+*.lnk
+
+# End of https://www.toptal.com/developers/gitignore/api/windows,cocoscreator,visualstudiocode
+
+node_modules/
+dist/

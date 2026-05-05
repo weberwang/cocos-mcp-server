@@ -1,0 +1,89 @@
+{
+    "$schema": "./@types/schema/package/index.json",
+    "package_version": 2,
+    "name": "cocos-mcp-server",
+    "version": "1.0.0",
+    "author": "MinkoWang",
+    "editor": ">=3.8.6",
+    "scripts": {
+        "build": "tsc",
+        "watch": "tsc -w"
+    },
+    "description": "Cocos Creator MCP server — provides scene, node, component, asset, prefab, and debug tools via HTTP gateway and scene scripting.",
+    "main": "./dist/main.js",
+    "dependencies": {
+        "@types/fs-extra": "^11.0.4",
+        "fs-extra": "^11.3.4",
+        "uuid": "^9.0.1",
+        "vue": "^3.5.33"
+    },
+    "devDependencies": {
+        "@cocos/creator-types": "^3.8.6",
+        "@types/node": "^18.17.1",
+        "@types/uuid": "^9.0.8",
+        "typescript": "^5.8.2"
+    },
+    "panels": {
+        "default": {
+            "title": "Cocos MCP Server",
+            "main": "./dist/panels/default/index.js",
+            "type": "dockable",
+            "size": {
+                "minWidth": 400,
+                "minHeight": 300,
+                "width": 540,
+                "height": 520
+            }
+        }
+    },
+    "contributions": {
+        "messages": {
+            "openPanel": { "methods": ["openPanel"] },
+            "startServer": { "methods": ["startServer"] },
+            "stopServer": { "methods": ["stopServer"] },
+            "getServerStatus": { "methods": ["getServerStatus"] },
+            "updateSettings": { "methods": ["updateSettings"] },
+            "getToolsList": { "methods": ["getToolsList"] },
+            "getFilteredToolsList": { "methods": ["getFilteredToolsList"] },
+            "getServerSettings": { "methods": ["getServerSettings"] },
+            "getSettings": { "methods": ["getSettings"] },
+            "getToolManagerState": { "methods": ["getToolManagerState"] },
+            "createToolConfiguration": { "methods": ["createToolConfiguration"] },
+            "updateToolConfiguration": { "methods": ["updateToolConfiguration"] },
+            "deleteToolConfiguration": { "methods": ["deleteToolConfiguration"] },
+            "setCurrentToolConfiguration": { "methods": ["setCurrentToolConfiguration"] },
+            "updateToolStatus": { "methods": ["updateToolStatus"] },
+            "updateToolStatusBatch": { "methods": ["updateToolStatusBatch"] },
+            "exportToolConfiguration": { "methods": ["exportToolConfiguration"] },
+            "importToolConfiguration": { "methods": ["importToolConfiguration"] },
+            "getEnabledTools": { "methods": ["getEnabledTools"] }
+        },
+        "menu": [
+            {
+                "path": "Extension/Cocos MCP Server",
+                "label": "Settings",
+                "message": "openPanel"
+            }
+        ],
+        "scene": {
+            "script": "./dist/scene.js",
+            "methods": [
+                "executeSceneMethod",
+                "getCurrentSceneInfo",
+                "createNode",
+                "addComponentToNode",
+                "removeComponentFromNode",
+                "getNodeInfo",
+                "getAllNodes",
+                "findNodeByName",
+                "getSceneHierarchy",
+                "setNodeProperty",
+                "createPrefabFromNode",
+                "setComponentProperty",
+                "getComponents",
+                "assignMaterialToRenderer",
+                "assignMaterialsBulk"
+            ]
+        }
+    }
+}
