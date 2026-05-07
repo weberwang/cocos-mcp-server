@@ -557,10 +557,11 @@ export class ProjectTools implements ToolExecutor {
     private async refreshAssets(folder?: string): Promise<ToolResponse> {
         try {
             const targetPath = folder || 'db://assets';
-            if (typeof (Editor as any).assetdb?.refresh === 'function') {
-                (Editor as any).assetdb.refresh(targetPath);
-            }
-            return { success: true, message: `Assets refresh triggered for: ${targetPath}` };
+            
+            // Use the improved refresh that triggers compilation and waits for .meta generation
+            await AssetDB.refreshAllAssets(targetPath);
+
+            return { success: true, message: `Assets refresh completed for: ${targetPath}` };
         } catch (err: any) {
             return { success: false, error: err.message };
         }

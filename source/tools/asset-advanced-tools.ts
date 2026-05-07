@@ -331,6 +331,7 @@ export class AssetAdvancedTools implements ToolExecutor {
                 let successCount = 0;
                 let errorCount = 0;
 
+                // Import each file with skipRefresh=true so we can do one bulk refresh at the end
                 for (const filePath of files) {
                     try {
                         const fileName = path.basename(filePath);
@@ -338,7 +339,8 @@ export class AssetAdvancedTools implements ToolExecutor {
                         
                         const result = await AssetDB.importAsset(filePath, targetPath, { 
                             overwrite: args.overwrite || false,
-                            rename: !(args.overwrite || false)
+                            rename: !(args.overwrite || false),
+                            skipRefresh: true  // Defer refresh until all imports complete
                         });
                         
                         importResults.push({
@@ -358,6 +360,16 @@ export class AssetAdvancedTools implements ToolExecutor {
                     }
                 }
 
+                // Single bulk refresh to generate all .meta files and trigger compilation
+                if (successCount > 0) {
+                    try {
+                        console.log(`[AssetAdvanced] Batch import: refreshing ${args.targetDirectory}...`);
+                        await AssetDB.refreshAllAssets(args.targetDirectory);
+                    } catch (refreshErr: any) {
+                        console.warn(`[AssetAdvanced] Batch refresh warning: ${refreshErr?.message || refreshErr}`);
+                    }
+                }
+
                 resolve({
                     success: true,
                     data: {
@@ -365,7 +377,8 @@ export class AssetAdvancedTools implements ToolExecutor {
                         successCount: successCount,
                         errorCount: errorCount,
                         results: importResults,
-                        message: `Batch import completed: ${successCount} success, ${errorCount} errors`
+                        message: `Batch import completed: ${successCount} success, ${errorCount} errors`,
+                        refreshCompleted: successCount > 0
                     }
                 });
             } catch (err: any) {

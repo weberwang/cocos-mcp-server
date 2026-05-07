@@ -1,10 +1,14 @@
 import { ToolDefinition, ToolResponse, ToolExecutor } from '../types';
+import * as AssetDB from '../asset-db-wrapper';
 
 /**
  * Batch execution tool — executes multiple MCP commands in a single HTTP
  * round-trip. Modeled after Unity-MCP's batch_execute, this dramatically
  * reduces latency for multi-object scene creation (e.g. 5 primitives in
  * one call instead of 5 separate requests).
+ * 
+ * Supports auto_refresh: when enabled, triggers a full asset-db refresh
+ * after all commands complete, ensuring .meta files and compilation settle.
  */
 export class BatchTools implements ToolExecutor {
     private executor: (toolName: string, args: any) => Promise<any>;
@@ -58,6 +62,15 @@ export class BatchTools implements ToolExecutor {
                             type: 'number',
                             default: 25,
                             description: 'Maximum commands allowed in this batch (hard max: 100)',
+                        },
+                        auto_refresh: {
+                            type: 'boolean',
+                            default: false,
+                            description: 'After all commands complete, trigger a full asset-db refresh to generate .meta files and wait for script compilation. Enable when batch includes asset creation (create_asset, save_asset, import_asset, create_scene, create_prefab, etc.).',
+                        },
+                        refresh_folder: {
+                            type: 'string',
+                            description: 'Asset folder to refresh after batch (default: all assets). Only used when auto_refresh is true.',
                         },
                     },
                     required: ['commands'],
@@ -138,7 +151,7 @@ export class BatchTools implements ToolExecutor {
         }
 
         const success = errors.length === 0;
-        return {
+        const response: ToolResponse = {
             success,
             message: success
                 ? `All ${commands.length} commands executed successfully`
@@ -151,5 +164,22 @@ export class BatchTools implements ToolExecutor {
                 durationMs: Date.now() - startTime,
             },
         };
+
+        // Post-batch refresh: ensure .meta files and script compilation complete
+        if (args.auto_refresh) {
+            try {
+                const folder = args.refresh_folder || undefined;
+                console.log(`[BatchTools] Auto-refreshing assets${folder ? ` in ${folder}` : ''}...`);
+                await AssetDB.refreshAllAssets(folder);
+                response.data!.refreshCompleted = true;
+                response.data!.refreshedFolder = folder || 'db://assets';
+            } catch (refreshErr: any) {
+                response.data!.refreshCompleted = false;
+                response.data!.refreshError = refreshErr?.message || String(refreshErr);
+                console.warn(`[BatchTools] Auto-refresh failed: ${refreshErr?.message || refreshErr}`);
+            }
+        }
+
+        return response;
     }
 }
