@@ -56,7 +56,8 @@
             "updateToolStatusBatch": { "methods": ["updateToolStatusBatch"] },
             "exportToolConfiguration": { "methods": ["exportToolConfiguration"] },
             "importToolConfiguration": { "methods": ["importToolConfiguration"] },
-            "getEnabledTools": { "methods": ["getEnabledTools"] }
+            "getEnabledTools": { "methods": ["getEnabledTools"] },
+            "configureAIClient": { "methods": ["configureAIClient"] }
         },
         "menu": [
             {

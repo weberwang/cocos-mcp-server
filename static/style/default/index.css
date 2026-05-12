@@ -134,6 +134,17 @@ section h3 {
     margin: 0 0 12px 0;
 }
 
+.client-config-selectors {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.client-config-selectors ui-prop {
+    margin-bottom: 0;
+}
+
 .client-config-buttons {
     display: flex;
     gap: 10px;
@@ -146,6 +157,7 @@ section h3 {
     border-radius: 4px;
     font-size: 13px;
     word-break: break-all;
+    white-space: pre-line;
 }
 
 .config-success {

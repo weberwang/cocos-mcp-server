@@ -5,9 +5,6 @@
  * with filesystem-based operations that work reliably across Creator versions.
  * 
  * All db:// URLs are converted to absolute filesystem paths using Editor.Project.path.
- * 
- * All creation functions now trigger an asset-db refresh after writing, ensuring
- * .meta files are generated and script compilation completes before returning.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -26,8 +23,6 @@ export interface AssetInfo {
 export interface ImportOptions {
     overwrite?: boolean;
     rename?: boolean;
-    /** When true, skip the automatic asset-db refresh after import. Use for batch operations. */
-    skipRefresh?: boolean;
 }
 
 // ── Path Utilities ─────────────────────────────────────
@@ -230,7 +225,6 @@ export async function queryUrl(uuid: string): Promise<string | null> {
 
 /**
  * Create asset or folder (replaces broken 'create-asset' IPC).
- * After writing, triggers asset-db refresh and waits for .meta generation.
  */
 export async function createAsset(url: string, content: string | null = null, options?: any): Promise<{ uuid: string; url: string }> {
     const fsPath = dbUrlToFsPath(url);
@@ -250,16 +244,12 @@ export async function createAsset(url: string, content: string | null = null, op
     }
 
     fs.writeFileSync(fsPath, content, 'utf-8');
-
-    // Refresh asset DB to generate .meta and trigger compilation
-    const metaReady = await refreshAsset(url);
-    const uuid = metaReady ? (getUUIDFromMeta(fsPath) || '') : '';
+    const uuid = getUUIDFromMeta(fsPath) || '';
     return { uuid, url };
 }
 
 /**
  * Delete asset (replaces broken 'delete-asset' IPC).
- * After deletion, triggers asset-db refresh so Creator picks up changes.
  */
 export async function deleteAsset(url: string): Promise<void> {
     const fsPath = dbUrlToFsPath(url);
@@ -275,23 +265,15 @@ export async function deleteAsset(url: string): Promise<void> {
                 fs.unlinkSync(metaPath);
             }
         }
-        // Trigger asset-db refresh so Creator picks up the deletion
+        // Trigger asset-db refresh so Creator picks up changes
         try {
             Editor.Message.request('asset-db', 'refresh-asset', url);
-        } catch {
-            try {
-                if (typeof (Editor as any).assetdb?.refresh === 'function') {
-                    (Editor as any).assetdb.refresh(url);
-                }
-            } catch { /* ok */ }
-        }
+        } catch { /* refresh might not work, but deletion was successful */ }
     }
 }
 
 /**
  * Import external asset (replaces broken 'import-asset' IPC).
- * After copying the file, triggers asset-db refresh and waits for .meta generation.
- * Set options.skipRefresh=true for batch imports — then call refreshAllAssets once afterward.
  */
 export async function importAsset(sourcePath: string, targetPath: string, options?: ImportOptions): Promise<{ uuid: string; url: string }> {
     const destFsPath = dbUrlToFsPath(targetPath);
@@ -308,20 +290,16 @@ export async function importAsset(sourcePath: string, targetPath: string, option
     // Copy the file
     fs.copyFileSync(sourcePath, destFsPath);
 
-    if (options?.skipRefresh) {
-        return { uuid: '', url: targetPath };
-    }
+    // Try to refresh
+    try {
+        Editor.Message.request('asset-db', 'refresh-asset', targetPath);
+    } catch { /* may fail but import succeeded */ }
 
-    // Refresh asset DB to generate .meta and trigger compilation
-    const metaReady = await refreshAsset(targetPath);
-    const uuid = metaReady ? (getUUIDFromMeta(destFsPath) || '') : '';
-
-    return { uuid, url: targetPath };
+    return { uuid: '', url: targetPath };
 }
 
 /**
  * Save asset content (replaces broken 'save-asset' IPC).
- * After writing, triggers asset-db refresh and waits for .meta generation.
  */
 export async function saveAsset(url: string, content: string): Promise<void> {
     const fsPath = dbUrlToFsPath(url);
@@ -330,9 +308,6 @@ export async function saveAsset(url: string, content: string): Promise<void> {
         fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(fsPath, content, 'utf-8');
-
-    // Refresh asset DB to ensure .meta is updated after content change
-    await refreshAsset(url);
 }
 
 /**
@@ -348,138 +323,6 @@ export async function reimportAsset(url: string): Promise<void> {
     } catch {
         // If both fail, the asset still exists on disk
     }
-}
-
-// ── Refresh & Compilation ───────────────────────────────
-
-/**
- * Max time (ms) to wait for asset-db refresh / script compilation to complete.
- * Script compilation in Cocos Creator can take a few seconds for large projects.
- */
-const ASSET_REFRESH_TIMEOUT_MS = 30_000;
-const ASSET_REFRESH_POLL_MS = 300;
-
-/** File extensions that require script compilation in Cocos Creator. */
-const SCRIPT_EXTENSIONS = ['.ts', '.js'];
-
-/**
- * Check whether a given asset path is a script that requires compilation.
- */
-function isScriptAsset(url: string): boolean {
-    const lower = url.toLowerCase();
-    return SCRIPT_EXTENSIONS.some(ext => lower.endsWith(ext));
-}
-
-/**
- * Wait for a .meta file to exist (and be non-empty) for the given filesystem path.
- * Returns true once the .meta is ready, false on timeout.
- */
-async function waitForMetaReady(fsPath: string, timeoutMs: number = ASSET_REFRESH_TIMEOUT_MS): Promise<boolean> {
-    const metaPath = fsPath + '.meta';
-    const start = Date.now();
-
-    while (Date.now() - start < timeoutMs) {
-        try {
-            if (fs.existsSync(metaPath)) {
-                const content = fs.readFileSync(metaPath, 'utf-8');
-                if (content && content.trim().length > 0) {
-                    // Verify it contains valid JSON with a uuid
-                    try {
-                        const parsed = JSON.parse(content);
-                        if (parsed && parsed.uuid) {
-                            return true;
-                        }
-                    } catch {
-                        // Not valid JSON yet, keep waiting
-                    }
-                }
-            }
-        } catch {
-            // File may be locked or partially written, keep waiting
-        }
-        await sleep(ASSET_REFRESH_POLL_MS);
-    }
-
-    // One last check
-    if (fs.existsSync(metaPath)) {
-        return true;
-    }
-    return false;
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Refresh a single asset in the asset database and wait for its .meta to be generated.
- * For script assets, also waits for compilation to complete (indicated by .meta update).
- * 
- * @param url - db:// URL of the asset to refresh
- * @returns true if the .meta file was confirmed ready, false if timed out
- */
-export async function refreshAsset(url: string): Promise<boolean> {
-    const fsPath = dbUrlToFsPath(url);
-
-    // Trigger asset-db refresh via the official IPC
-    try {
-        Editor.Message.request('asset-db', 'refresh-asset', url);
-    } catch {
-        // Fallback: try internal API
-        try {
-            if (typeof (Editor as any).assetdb?.refresh === 'function') {
-                (Editor as any).assetdb.refresh(url);
-            }
-        } catch {
-            // Best effort — the filesystem write already happened
-        }
-    }
-
-    // For scripts, also trigger compilation
-    if (isScriptAsset(url)) {
-        try {
-            // Request script compilation via the builder/compiler IPC
-            Editor.Message.request('asset-db', 'refresh-asset', url + '.meta');
-        } catch { /* ok */ }
-    }
-
-    // Wait for .meta to be generated/updated
-    const ready = await waitForMetaReady(fsPath, ASSET_REFRESH_TIMEOUT_MS);
-
-    // For scripts, give a little extra time for the importer to populate
-    if (isScriptAsset(url) && ready) {
-        await sleep(500);
-    }
-
-    console.log(`[AssetDB] refreshAsset '${url}' — meta ready: ${ready}`);
-    return ready;
-}
-
-/**
- * Refresh all assets under a given folder (or the entire assets tree).
- * Triggers asset-db refresh and waits for pending compilations to settle.
- * 
- * @param folder - db:// URL of the folder to refresh (defaults to all assets)
- */
-export async function refreshAllAssets(folder?: string): Promise<void> {
-    const targetPath = folder || 'db://assets';
-
-    try {
-        // Use the internal API for a full refresh if available (synchronous-ish)
-        if (typeof (Editor as any).assetdb?.refresh === 'function') {
-            (Editor as any).assetdb.refresh(targetPath);
-        }
-    } catch { /* ok */ }
-
-    // Also fire the IPC-based refresh for broader coverage
-    try {
-        Editor.Message.request('asset-db', 'refresh-asset', targetPath);
-    } catch { /* ok */ }
-
-    // For script-heavy operations, allow a settling period
-    await sleep(1500);
-
-    console.log(`[AssetDB] refreshAllAssets triggered for: ${targetPath}`);
 }
 
 /**
@@ -558,7 +401,6 @@ export async function saveAssetMeta(urlOrUUID: string, content: string): Promise
 
 /**
  * Copy asset to target location.
- * After copying, triggers asset-db refresh and waits for .meta generation.
  */
 export async function copyAsset(source: string, target: string, overwrite: boolean = false): Promise<{ uuid: string; url: string }> {
     const srcFs = dbUrlToFsPath(source);
@@ -585,9 +427,8 @@ export async function copyAsset(source: string, target: string, overwrite: boole
         }
     }
 
-    // Refresh asset DB to generate .meta for the new copy
-    await refreshAsset(target);
-    return { uuid: getUUIDFromMeta(tgtFs) || '', url: target };
+    try { Editor.Message.request('asset-db', 'refresh-asset', target); } catch { /* ok */ }
+    return { uuid: '', url: target };
 }
 
 /**
@@ -630,6 +471,4 @@ export default {
     saveAssetMeta,
     copyAsset,
     moveAsset,
-    refreshAsset,
-    refreshAllAssets,
 };
