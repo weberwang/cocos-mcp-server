@@ -302,7 +302,6 @@ export class MCPServer {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-        res.setHeader('Content-Type', 'application/json');
         
         if (req.method === 'OPTIONS') {
             res.writeHead(200);
@@ -320,9 +319,11 @@ export class MCPServer {
                 res.writeHead(405);
                 res.end();
             } else if (pathname === '/health' && req.method === 'GET') {
+                res.setHeader('Content-Type', 'application/json');
                 res.writeHead(200);
                 res.end(JSON.stringify({ status: 'ok', tools: this.toolsList.length }));
             } else if (pathname === '/status' && req.method === 'GET') {
+                res.setHeader('Content-Type', 'application/json');
                 res.writeHead(200);
                 res.end(JSON.stringify({
                     running: !!this.httpServer,
@@ -334,6 +335,7 @@ export class MCPServer {
                     activeInstanceId: `creator-${this.settings.port}`
                 }));
             } else if (pathname === '/capabilities' && req.method === 'GET') {
+                res.setHeader('Content-Type', 'application/json');
                 res.writeHead(200);
                 res.end(JSON.stringify({
                     tools: this.toolsList.map(t => t.name),
@@ -345,14 +347,17 @@ export class MCPServer {
             } else if (pathname?.startsWith('/api/') && req.method === 'POST') {
                 await this.handleSimpleAPIRequest(req, res, pathname);
             } else if (pathname === '/api/tools' && req.method === 'GET') {
+                res.setHeader('Content-Type', 'application/json');
                 res.writeHead(200);
                 res.end(JSON.stringify({ tools: this.getSimplifiedToolsList() }));
             } else {
+                res.setHeader('Content-Type', 'application/json');
                 res.writeHead(404);
                 res.end(JSON.stringify({ error: 'Not found' }));
             }
         } catch (error) {
             console.error('HTTP request error:', error);
+            res.setHeader('Content-Type', 'application/json');
             res.writeHead(500);
             res.end(JSON.stringify({ error: 'Internal server error' }));
         }
@@ -384,16 +389,18 @@ export class MCPServer {
                 
                 if (this.isNotification(message)) {
                     await this.handleNotification(message);
-                    res.writeHead(202);
+                    res.writeHead(204);
                     res.end();
                     return;
                 }
 
                 const response = await this.handleMessage(message);
+                res.setHeader('Content-Type', 'application/json');
                 res.writeHead(200);
                 res.end(JSON.stringify(response));
             } catch (error: any) {
                 console.error('Error handling MCP request:', error);
+                res.setHeader('Content-Type', 'application/json');
                 res.writeHead(400);
                 res.end(JSON.stringify({
                     jsonrpc: '2.0',
