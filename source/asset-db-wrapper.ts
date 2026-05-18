@@ -25,12 +25,41 @@ export interface ImportOptions {
     rename?: boolean;
 }
 
+export interface CreatedAssetResult {
+    url: string;
+    uuid: string;
+    metaReady?: boolean;
+}
+
 // ── Path Utilities ─────────────────────────────────────
 export function dbUrlToFsPath(dbUrl: string): string {
     if (dbUrl.startsWith('db://')) {
         return path.join(Editor.Project.path, dbUrl.replace('db://', ''));
     }
     return dbUrl;
+}
+
+export function throwIfAssetExists(
+    assetUrl: string,
+    overwrite: boolean,
+    assetExists: (normalizedUrl: string) => boolean,
+    normalizeUrl: (url: string) => string
+): string {
+    const normalizedUrl = normalizeUrl(assetUrl);
+    if (!overwrite && assetExists(normalizedUrl)) {
+        throw new Error(`Asset already exists: ${normalizedUrl}`);
+    }
+    return normalizedUrl;
+}
+
+export function ensureCreatedAssetIsReady<T extends CreatedAssetResult>(asset: T): T {
+    if (!asset.uuid || !asset.uuid.trim()) {
+        throw new Error(`Created asset is missing uuid: ${asset.url}`);
+    }
+    if (asset.metaReady === false) {
+        throw new Error(`Created asset meta is not ready: ${asset.url}`);
+    }
+    return asset;
 }
 
 function fsPathToDbUrl(fsPath: string): string {

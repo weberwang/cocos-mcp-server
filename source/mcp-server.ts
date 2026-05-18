@@ -313,6 +313,12 @@ export class MCPServer {
         try {
             if (pathname === '/mcp' && req.method === 'POST') {
                 await this.handleMCPRequest(req, res);
+            } else if (pathname === '/mcp' && req.method === 'GET') {
+                res.writeHead(405);
+                res.end();
+            } else if (pathname === '/mcp' && req.method === 'DELETE') {
+                res.writeHead(405);
+                res.end();
             } else if (pathname === '/health' && req.method === 'GET') {
                 res.writeHead(200);
                 res.end(JSON.stringify({ status: 'ok', tools: this.toolsList.length }));
@@ -376,6 +382,13 @@ export class MCPServer {
                     }
                 }
                 
+                if (this.isNotification(message)) {
+                    await this.handleNotification(message);
+                    res.writeHead(202);
+                    res.end();
+                    return;
+                }
+
                 const response = await this.handleMessage(message);
                 res.writeHead(200);
                 res.end(JSON.stringify(response));
@@ -394,6 +407,23 @@ export class MCPServer {
         });
     }
 
+    private isNotification(message: any): boolean {
+        return !!message
+            && message.jsonrpc === '2.0'
+            && typeof message.method === 'string'
+            && !Object.prototype.hasOwnProperty.call(message, 'id');
+    }
+
+    private async handleNotification(message: any): Promise<void> {
+        switch (message.method) {
+            case 'notifications/initialized':
+                console.log('[MCPServer] Client initialized notification received');
+                return;
+            default:
+                console.warn(`[MCPServer] Ignoring unsupported notification: ${message.method}`);
+        }
+    }
+
     private async handleMessage(message: any): Promise<any> {
         const { id, method, params } = message;
 
@@ -401,6 +431,12 @@ export class MCPServer {
             let result: any;
 
             switch (method) {
+                case 'resources/list':
+                    result = { resources: [] };
+                    break;
+                case 'resources/templates/list':
+                    result = { resourceTemplates: [] };
+                    break;
                 case 'tools/list':
                     result = { tools: this.getAvailableTools() };
                     break;

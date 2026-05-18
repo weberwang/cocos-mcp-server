@@ -14,7 +14,19 @@ function log(msg: string): void {
   process.stderr.write(`[cocos-mcp] ${msg}\n`);
 }
 
+function isNotification(line: string): boolean {
+  try {
+    const message = JSON.parse(line);
+    return message?.jsonrpc === '2.0'
+      && typeof message?.method === 'string'
+      && !Object.prototype.hasOwnProperty.call(message, 'id');
+  } catch {
+    return false;
+  }
+}
+
 function forward(line: string): void {
+  const notification = isNotification(line);
   const req = http.request(
     `${BASE}/mcp`,
     {
@@ -28,6 +40,12 @@ function forward(line: string): void {
       let body = '';
       res.on('data', (chunk) => { body += chunk; });
       res.on('end', () => {
+        if (!body.trim()) {
+          if (!notification && res.statusCode && res.statusCode >= 400) {
+            log(`HTTP ${res.statusCode} with empty response body`);
+          }
+          return;
+        }
         process.stdout.write(body + '\n');
       });
     },

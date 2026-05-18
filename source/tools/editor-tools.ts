@@ -1,4 +1,30 @@
+import * as AssetDB from '../asset-db-wrapper';
 import { ToolDefinition, ToolResponse, ToolExecutor } from '../types';
+
+export interface SaveAsFallbackDeps {
+    getCurrentSceneUuid: () => Promise<string | null>;
+    getSceneAssetUrl: (uuid: string) => Promise<string | null>;
+    ensureSceneAssetExists: (url: string) => Promise<void>;
+}
+
+export async function shouldFallbackToSaveAsWhenOriginalSceneMissing(deps: SaveAsFallbackDeps): Promise<boolean> {
+    const sceneUuid = await deps.getCurrentSceneUuid();
+    if (!sceneUuid) {
+        return false;
+    }
+
+    const sceneAssetUrl = await deps.getSceneAssetUrl(sceneUuid);
+    if (!sceneAssetUrl) {
+        return true;
+    }
+
+    try {
+        await deps.ensureSceneAssetExists(sceneAssetUrl);
+        return false;
+    } catch (error: any) {
+        return typeof error?.message === 'string' && error.message.includes('Asset not found');
+    }
+}
 
 export class EditorTools implements ToolExecutor {
     getTools(): ToolDefinition[] {
@@ -120,13 +146,47 @@ export class EditorTools implements ToolExecutor {
         try {
             await Editor.Message.request('scene', 'save-scene');
             return { success: true, message: 'Scene saved' };
-        } catch {
-            try {
-                await (Editor.Message.request as any)('scene', 'save-as-scene');
-                return { success: true, message: 'Scene save dialog opened' };
-            } catch (err: any) {
+        } catch (err: any) {
+            const shouldFallbackToSaveAs = await shouldFallbackToSaveAsWhenOriginalSceneMissing({
+                getCurrentSceneUuid: async () => this.getCurrentSceneUuid(),
+                getSceneAssetUrl: async (uuid: string) => AssetDB.queryUrl(uuid),
+                ensureSceneAssetExists: async (url: string) => {
+                    await AssetDB.queryAssetInfo(url);
+                }
+            });
+
+            if (!shouldFallbackToSaveAs) {
                 return { success: false, error: err.message };
             }
+
+            try {
+                await (Editor.Message.request as any)('scene', 'save-as-scene');
+                return { success: true, message: 'Scene save dialog opened because the original scene asset is missing' };
+            } catch (saveAsError: any) {
+                return { success: false, error: saveAsError.message };
+            }
         }
+    }
+
+    private async getCurrentSceneUuid(): Promise<string | null> {
+        try {
+            const tree: any = await Editor.Message.request('scene', 'query-node-tree');
+            if (tree && typeof tree === 'object' && !Array.isArray(tree) && typeof tree.uuid === 'string' && tree.uuid) {
+                return tree.uuid;
+            }
+        } catch {
+            // Fall through to query-current-scene fallback.
+        }
+
+        try {
+            const currentScene: any = await Editor.Message.request('scene', 'query-current-scene');
+            if (currentScene && typeof currentScene.uuid === 'string' && currentScene.uuid) {
+                return currentScene.uuid;
+            }
+        } catch {
+            // Ignore and report no resolvable current scene.
+        }
+
+        return null;
     }
 }
