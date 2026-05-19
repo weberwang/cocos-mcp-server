@@ -1,11 +1,22 @@
-import { MCPServer } from './mcp-server';
 import { readSettings, saveSettings } from './settings';
 import { MCPServerSettings } from './types';
-import { ToolManager } from './tools/tool-manager';
-import { configureAIClients, AIClientTarget, ConfigLocation } from './client-config';
+import { AIClientTarget, ConfigLocation } from './client-config';
+import { loadRuntimeModules, RuntimeModules } from './runtime-modules';
 
-let mcpServer: MCPServer | null = null;
-let toolManager: ToolManager;
+let runtimeModules: RuntimeModules | null = null;
+let mcpServer: InstanceType<RuntimeModules['MCPServer']> | null = null;
+let toolManager: InstanceType<RuntimeModules['ToolManager']>;
+
+/**
+ * 获取当前可用的运行时依赖。
+ * 扩展被重新启用时会先刷新模块缓存，再重新拉起服务和工具实例。
+ */
+function getRuntimeModules(): RuntimeModules {
+    if (!runtimeModules) {
+        runtimeModules = loadRuntimeModules();
+    }
+    return runtimeModules;
+}
 
 export const methods: { [key: string]: (...any: any) => any } = {
     openPanel() {
@@ -40,6 +51,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
     },
 
     async updateSettings(settings: MCPServerSettings) {
+        const { MCPServer } = getRuntimeModules();
         saveSettings(settings);
         if (mcpServer) {
             mcpServer.stop();
@@ -175,6 +187,7 @@ export const methods: { [key: string]: (...any: any) => any } = {
     },
 
     async configureAIClient(target: AIClientTarget, location: ConfigLocation) {
+        const { configureAIClients } = getRuntimeModules();
         const result = configureAIClients(target, location);
 
         if (result.success) {
@@ -189,6 +202,9 @@ export const methods: { [key: string]: (...any: any) => any } = {
 
 export function load() {
     console.log('Cocos MCP Server extension loaded');
+
+    runtimeModules = loadRuntimeModules();
+    const { MCPServer, ToolManager } = runtimeModules;
 
     toolManager = new ToolManager();
 
@@ -208,4 +224,5 @@ export function unload() {
         mcpServer.stop();
         mcpServer = null;
     }
+    runtimeModules = null;
 }
