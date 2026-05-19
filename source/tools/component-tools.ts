@@ -1,4 +1,6 @@
 import { ToolDefinition, ToolResponse, ToolExecutor, ComponentInfo } from '../types';
+import { normalizeColorObject, parseColorString } from './color-parser';
+import { normalizeSizeObject, parseSizeString } from './size-parser';
 
 export class ComponentTools implements ToolExecutor {
     getTools(): ToolDefinition[] {
@@ -592,16 +594,12 @@ export class ComponentTools implements ToolExecutor {
                         break;
                     case 'color':
                         if (typeof value === 'string') {
-                            processedValue = this.parseColorString(value);
+                            processedValue = parseColorString(value);
                         } else if (typeof value === 'object' && value !== null) {
-                            processedValue = {
-                                r: Math.min(255, Math.max(0, Number(value.r) || 0)),
-                                g: Math.min(255, Math.max(0, Number(value.g) || 0)),
-                                b: Math.min(255, Math.max(0, Number(value.b) || 0)),
-                                a: value.a !== undefined ? Math.min(255, Math.max(0, Number(value.a))) : 255
-                            };
+                            // 统一复用颜色对象归一化逻辑，避免字符串入口和对象入口的边界处理不一致。
+                            processedValue = normalizeColorObject(value);
                         } else {
-                            throw new Error('Color value must be an object with r, g, b properties or a hexadecimal string (e.g., "#FF0000")');
+                            throw new Error('Color value must be an object with r, g, b properties, a hexadecimal string (e.g., "#FF0000"), or a serialized JSON color object');
                         }
                         break;
                     case 'vec2':
@@ -626,13 +624,13 @@ export class ComponentTools implements ToolExecutor {
                         }
                         break;
                     case 'size':
-                        if (typeof value === 'object' && value !== null) {
-                            processedValue = {
-                                width: Number(value.width) || 0,
-                                height: Number(value.height) || 0
-                            };
+                        if (typeof value === 'string') {
+                            processedValue = parseSizeString(value);
+                        } else if (typeof value === 'object' && value !== null) {
+                            // 统一复用尺寸归一化逻辑，兼容字符串入口与对象入口的宽高边界处理。
+                            processedValue = normalizeSizeObject(value);
                         } else {
-                            throw new Error('Size value must be an object with width, height properties');
+                            throw new Error('Size value must be an object with width, height properties or a serialized JSON size object');
                         }
                         break;
                     case 'node':
@@ -1423,18 +1421,12 @@ export class ComponentTools implements ToolExecutor {
                 // 优化的颜色处理，支持多种输入格式
                 if (typeof inputValue === 'string') {
                     // 字符串格式：十六进制、颜色名称、rgb()/rgba()
-                    return this.parseColorString(inputValue);
+                    return parseColorString(inputValue);
                 } else if (typeof inputValue === 'object' && inputValue !== null) {
                     try {
-                        const inputKeys = Object.keys(inputValue);
                         // 如果输入是颜色对象，验证并转换
-                        if (inputKeys.includes('r') || inputKeys.includes('g') || inputKeys.includes('b')) {
-                            return {
-                                r: Math.min(255, Math.max(0, Number(inputValue.r) || 0)),
-                                g: Math.min(255, Math.max(0, Number(inputValue.g) || 0)),
-                                b: Math.min(255, Math.max(0, Number(inputValue.b) || 0)),
-                                a: inputValue.a !== undefined ? Math.min(255, Math.max(0, Number(inputValue.a))) : 255
-                            };
+                        if ('r' in inputValue || 'g' in inputValue || 'b' in inputValue) {
+                            return normalizeColorObject(inputValue);
                         }
                     } catch (error) {
                         console.warn(`[smartConvertValue] Invalid color object: ${JSON.stringify(inputValue)}`);
@@ -1478,10 +1470,15 @@ export class ComponentTools implements ToolExecutor {
                 return originalValue;
                 
             case 'size':
+                if (typeof inputValue === 'string') {
+                    return parseSizeString(inputValue);
+                }
+
                 if (typeof inputValue === 'object' && inputValue !== null) {
+                    const normalizedSize = normalizeSizeObject(inputValue);
                     return {
-                        width: Number(inputValue.width) || originalValue.width || 100,
-                        height: Number(inputValue.height) || originalValue.height || 100
+                        width: normalizedSize.width || originalValue.width || 100,
+                        height: normalizedSize.height || originalValue.height || 100
                     };
                 }
                 return originalValue;
@@ -1512,29 +1509,6 @@ export class ComponentTools implements ToolExecutor {
                 }
                 return originalValue;
         }
-    }
-
-        private parseColorString(colorStr: string): { r: number; g: number; b: number; a: number } {
-        const str = colorStr.trim();
-        
-        // 只支持十六进制格式 #RRGGBB 或 #RRGGBBAA
-        if (str.startsWith('#')) {
-            if (str.length === 7) { // #RRGGBB
-                const r = parseInt(str.substring(1, 3), 16);
-                const g = parseInt(str.substring(3, 5), 16);
-                const b = parseInt(str.substring(5, 7), 16);
-                return { r, g, b, a: 255 };
-            } else if (str.length === 9) { // #RRGGBBAA
-                const r = parseInt(str.substring(1, 3), 16);
-                const g = parseInt(str.substring(3, 5), 16);
-                const b = parseInt(str.substring(5, 7), 16);
-                const a = parseInt(str.substring(7, 9), 16);
-                return { r, g, b, a };
-            }
-        }
-        
-        // 如果不是有效的十六进制格式，返回错误提示
-        throw new Error(`Invalid color format: "${colorStr}". Only hexadecimal format is supported (e.g., "#FF0000" or "#FF0000FF")`);
     }
 
     private async verifyPropertyChange(nodeUuid: string, componentType: string, property: string, originalValue: any, expectedValue: any): Promise<{ verified: boolean; actualValue: any; fullData: any }> {
