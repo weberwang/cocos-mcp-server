@@ -21,9 +21,52 @@ export interface SceneCreationDeps {
     openSceneByUuid?: (uuid: string) => Promise<void>;
 }
 
+export interface SceneSwitchGuardRequest {
+    operation: 'open_scene' | 'close_scene';
+    dirty: boolean;
+    autoSave?: boolean;
+}
+
+export interface SceneSwitchGuardPlan {
+    allowed: boolean;
+    shouldSave: boolean;
+    reason: string | null;
+}
+
 export function buildSceneAssetUrl(savePath: string, sceneName: string): string {
     const trimmed = savePath.trim().replace(/\/+$/, '');
     return trimmed.endsWith('.scene') ? trimmed : `${trimmed}/${sceneName}.scene`;
+}
+
+/**
+ * 统一规划切场景前的脏状态处理，避免 Creator 弹保存确认阻塞自动化流程。
+ */
+export function planSceneSwitchGuard(request: SceneSwitchGuardRequest): SceneSwitchGuardPlan {
+    if (!request.dirty) {
+        return {
+            allowed: true,
+            shouldSave: false,
+            reason: null,
+        };
+    }
+
+    if (request.autoSave) {
+        return {
+            allowed: true,
+            shouldSave: true,
+            reason: null,
+        };
+    }
+
+    const actionLabel = request.operation === 'open_scene'
+        ? 'switching scenes'
+        : 'closing the scene';
+
+    return {
+        allowed: false,
+        shouldSave: false,
+        reason: `Current scene has unsaved changes. Pass autoSave=true to save before ${actionLabel}.`,
+    };
 }
 
 function buildDefaultSceneContent(sceneName: string): string {
@@ -250,6 +293,11 @@ export class SceneTools implements ToolExecutor {
                         scenePath: {
                             type: 'string',
                             description: 'The scene file path'
+                        },
+                        autoSave: {
+                            type: 'boolean',
+                            description: 'Save the current dirty scene before opening another scene',
+                            default: false
                         }
                     },
                     required: ['scenePath']
@@ -300,7 +348,13 @@ export class SceneTools implements ToolExecutor {
                 description: 'Close current scene',
                 inputSchema: {
                     type: 'object',
-                    properties: {}
+                    properties: {
+                        autoSave: {
+                            type: 'boolean',
+                            description: 'Save the current dirty scene before closing it',
+                            default: false
+                        }
+                    }
                 }
             },
             {
@@ -342,7 +396,7 @@ export class SceneTools implements ToolExecutor {
                 }
                 return slResult;
             case 'open_scene':
-                return await this.openScene(args.scenePath);
+                return await this.openScene(args.scenePath, args.autoSave);
             case 'save_scene':
                 return await this.saveScene();
             case 'create_scene':
@@ -350,7 +404,7 @@ export class SceneTools implements ToolExecutor {
             case 'save_scene_as':
                 return await this.saveSceneAs(args.path);
             case 'close_scene':
-                return await this.closeScene();
+                return await this.closeScene(args.autoSave);
             case 'get_scene_hierarchy':
                 const shResult = await this.getSceneHierarchy(args.includeComponents);
                 if (shResult.success && Array.isArray(shResult.data)) {
@@ -412,8 +466,52 @@ export class SceneTools implements ToolExecutor {
         }
     }
 
-    private async openScene(scenePath: string): Promise<ToolResponse> {
+    /**
+     * 查询当前场景是否有未保存修改，供切场景保护逻辑复用。
+     */
+    private async isSceneDirty(): Promise<boolean> {
         try {
+            const dirty = await Editor.Message.request('scene', 'query-dirty');
+            return dirty === true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * 在切换或关闭场景前先处理 dirty 状态，避免编辑器弹确认框卡住流程。
+     */
+    private async guardSceneSwitch(operation: 'open_scene' | 'close_scene', autoSave = false): Promise<ToolResponse | null> {
+        const guardPlan = planSceneSwitchGuard({
+            operation,
+            dirty: await this.isSceneDirty(),
+            autoSave,
+        });
+
+        if (!guardPlan.allowed) {
+            return {
+                success: false,
+                error: guardPlan.reason ?? 'Current scene has unsaved changes',
+            };
+        }
+
+        if (guardPlan.shouldSave) {
+            const saveResult = await this.saveScene();
+            if (!saveResult.success) {
+                return saveResult;
+            }
+        }
+
+        return null;
+    }
+
+    private async openScene(scenePath: string, autoSave = false): Promise<ToolResponse> {
+        try {
+            const guardResult = await this.guardSceneSwitch('open_scene', autoSave);
+            if (guardResult) {
+                return guardResult;
+            }
+
             const uuid = await AssetDB.queryUuid(scenePath);
             if (!uuid) {
                 return { success: false, error: 'Scene not found' };
@@ -527,7 +625,12 @@ export class SceneTools implements ToolExecutor {
         });
     }
 
-    private async closeScene(): Promise<ToolResponse> {
+    private async closeScene(autoSave = false): Promise<ToolResponse> {
+        const guardResult = await this.guardSceneSwitch('close_scene', autoSave);
+        if (guardResult) {
+            return guardResult;
+        }
+
         return new Promise((resolve) => {
             Editor.Message.request('scene', 'close-scene').then(() => {
                 resolve({

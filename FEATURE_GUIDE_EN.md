@@ -63,13 +63,15 @@ Open a scene by path
 
 **Parameters**:
 - `scenePath` (string, required): Scene file path
+- `autoSave` (boolean, optional): Whether to save the current dirty scene before opening another scene, defaults to false
 
 **Example**:
 ```json
 {
   "tool": "scene_open_scene",
   "arguments": {
-    "scenePath": "db://assets/scenes/GameScene.scene"
+    "scenePath": "db://assets/scenes/GameScene.scene",
+    "autoSave": true
   }
 }
 ```
@@ -77,7 +79,8 @@ Open a scene by path
 ### 1.4 scene_save_scene
 Save current scene
 
-**Parameters**: None
+**Parameters**:
+- `autoSave` (boolean, optional): Whether to save the current dirty scene before closing it, defaults to false
 
 **Example**:
 ```json
@@ -130,7 +133,9 @@ Close current scene
 ```json
 {
   "tool": "scene_close_scene",
-  "arguments": {}
+  "arguments": {
+    "autoSave": true
+  }
 }
 ```
 

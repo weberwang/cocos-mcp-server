@@ -63,13 +63,15 @@ MCP 服务器提供了 **158 个工具**，按功能分为 13 个主要类别：
 
 **参数**:
 - `scenePath` (string, 必需): 场景文件路径
+- `autoSave` (boolean, 可选): 打开前是否先保存当前已修改但未保存的场景，默认为 false
 
 **示例**:
 ```json
 {
   "tool": "scene_open_scene",
   "arguments": {
-    "scenePath": "db://assets/scenes/GameScene.scene"
+    "scenePath": "db://assets/scenes/GameScene.scene",
+    "autoSave": true
   }
 }
 ```
@@ -77,7 +79,8 @@ MCP 服务器提供了 **158 个工具**，按功能分为 13 个主要类别：
 ### 1.4 scene_save_scene
 保存当前场景
 
-**参数**: 无
+**参数**:
+- `autoSave` (boolean, 可选): 关闭前是否先保存当前已修改但未保存的场景，默认为 false
 
 **示例**:
 ```json
@@ -130,7 +133,9 @@ MCP 服务器提供了 **158 个工具**，按功能分为 13 个主要类别：
 ```json
 {
   "tool": "scene_close_scene",
-  "arguments": {}
+  "arguments": {
+    "autoSave": true
+  }
 }
 ```
 
