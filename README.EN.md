@@ -20,7 +20,14 @@ A comprehensive MCP (Model Context Protocol) server plugin for Cocos Creator 3.8
 
 ## Changelog
 
-## 🚀 Major Update v1.5.0 (July 29, 2024) (Already updated in Cocos Store, GitHub version will be synchronized in next version)
+## 🚀 Current GitHub Release v1.5.1 (May 20, 2026)
+
+- **Improved screenshot capture pipeline**: Strengthened Scene View and Game View capture paths, with better raw-pixel-to-PNG fallback handling to reduce blank screenshots and source selection failures.
+- **Scene save and creation fallback fixes**: Fixed fallback paths for creating scenes, saving scenes, and materializing scene assets so newly created scenes are persisted and reopened more reliably.
+- **MCP handshake and notification compatibility updates**: Refined `initialize`, `notifications/initialized`, and related HTTP responses to improve connection stability with Claude, Cursor, and similar clients.
+- **Synchronized color and size parser fixes**: Synced the `color` and `size` parser fixes so component property writes handle color-like and size-like values more consistently.
+
+## 🚀 Major Update v1.5.0 (July 29, 2024) (This release is now synced to GitHub and serves as the current baseline)
 
 Cocos store: https://store.cocos.com/app/detail/7941
 
@@ -67,7 +74,7 @@ Cocos store: https://store.cocos.com/app/detail/7941
 - **broadcast_message**: Message broadcasting
 
 
-### v1.4.0 - July 26, 2025 (Current github version)
+### v1.4.0 - July 26, 2025
 
 #### 🎯 Major Functionality Fixes
 - **Complete Prefab Creation Fix**: Thoroughly resolved the issue of component/node/resource type reference loss during prefab creation

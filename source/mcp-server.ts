@@ -21,6 +21,9 @@ import { BatchTools } from './tools/batch-tools';
 import { ManageTools, getEnabledCategories } from './tools/tool-groups';
 import { MaterialTools } from './tools/material-tools';
 
+// 统一维护插件对外暴露的版本号，避免状态接口、能力接口和握手信息各自漂移。
+const MCP_SERVER_VERSION = '1.5.1';
+
 export class MCPServer {
     private settings: MCPServerSettings;
     private httpServer: http.Server | null = null;
@@ -327,7 +330,7 @@ export class MCPServer {
                 res.writeHead(200);
                 res.end(JSON.stringify({
                     running: !!this.httpServer,
-                    version: '1.0.0',
+                    version: MCP_SERVER_VERSION,
                     creatorVersion: '3.8.8',
                     projectPath: Editor.Project?.path || '',
                     port: this.settings.port,
@@ -340,7 +343,7 @@ export class MCPServer {
                 res.end(JSON.stringify({
                     tools: this.toolsList.map(t => t.name),
                     writeTools: [],
-                    bridgeVersion: '1.0.0'
+                    bridgeVersion: MCP_SERVER_VERSION
                 }));
             } else if (pathname === '/call-tool' && req.method === 'POST') {
                 await this.handleCallToolApi(req, res);
@@ -461,7 +464,7 @@ export class MCPServer {
                         },
                         serverInfo: {
                             name: 'cocos-mcp-server',
-                            version: '1.0.0'
+                            version: MCP_SERVER_VERSION
                         }
                     };
                     break;

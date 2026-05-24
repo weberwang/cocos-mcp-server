@@ -11,15 +11,22 @@
 [<img width="503" height="351" alt="image" src="https://github.com/user-attachments/assets/f186ce14-9ffc-4a29-8761-48bdd7c1ea16" />](https://www.bilibili.com/video/BV1mB8dzfEw8?spm_id_from=333.788.recommend_more_video.0&vd_source=6b1ff659dd5f04a92cc6d14061e8bb92)
 
 
-##快速链接
+## 快速链接
 
-- **[📖 Complete Feature Guide (English)](FEATURE_GUIDE_EN.md)** - Detailed documentation for all 158 tools（待补充）
-- **[📖 完整功能指南 (中文)](FEATURE_GUIDE_CN.md)** - 所有158工具的详细文档（待补充）
+- **[📖 Complete Feature Guide (English)](FEATURE_GUIDE_EN.md)** - Detailed documentation for all 50 tools（待补充）
+- **[📖 完整功能指南 (中文)](FEATURE_GUIDE_CN.md)** - 所有50个工具的详细文档（待补充）
 
 
 ## 更新日志
 
-## 🚀 重大更新 v1.5.0（2024年7月29日）（已经在cocos 商城更新，github版本将在下个版本同步更新）
+## 🚀 当前 GitHub 版本 v1.5.1（2026年5月20日）
+
+- **编辑器截图链路增强**：补强场景视图与游戏视图截图路径，完善原始像素转 PNG 的兜底流程，降低空白截图和窗口识别失败概率。
+- **场景保存与创建兜底修复**：修复新建场景、另存场景和资源创建流程中的兜底逻辑，提高场景资产落盘与重新打开的稳定性。
+- **MCP 握手与通知兼容优化**：补齐 `initialize`、`notifications/initialized` 和 HTTP 响应细节，提升 Claude、Cursor 等客户端的连接稳定性。
+- **颜色与尺寸解析同步修复**：同步 `color` / `size` 解析器修复，提升组件属性写入时对颜色、尺寸类参数的容错与一致性。
+
+## 🚀 重大更新 v1.5.0（2024年7月29日）（该版本已同步到 GitHub，作为当前功能基线）
 
 cocos store：https://store.cocos.com/app/detail/7941
 
@@ -66,7 +73,7 @@ cocos store：https://store.cocos.com/app/detail/7941
 - **broadcast_message**：消息广播
 
 
-### v1.4.0 - 2025年7月26日（当前github版本）
+### v1.4.0 - 2025年7月26日
 
 #### 🎯 重大功能修复
 - **完全修复预制体创建功能**: 彻底解决了预制体创建时组件/节点/资源类型引用丢失的问题
