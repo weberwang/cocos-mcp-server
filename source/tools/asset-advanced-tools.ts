@@ -1,6 +1,9 @@
 import { ToolDefinition, ToolResponse, ToolExecutor } from '../types';
 import * as AssetDB from '../asset-db-wrapper';
 
+/**
+ * 资源高级工具，承载批量导入、meta 同步与资源分析等扩展能力。
+ */
 export class AssetAdvancedTools implements ToolExecutor {
     getTools(): ToolDefinition[] {
         return [
@@ -90,6 +93,38 @@ export class AssetAdvancedTools implements ToolExecutor {
                         }
                     },
                     required: ['sourceDirectory', 'targetDirectory']
+                }
+            },
+            {
+                name: 'refresh_assets_and_wait',
+                description: 'Refresh assets and wait until their meta files are ready',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        urls: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'Asset URLs that should have ready meta files after refresh'
+                        },
+                        timeoutMs: {
+                            type: 'number',
+                            description: 'Maximum wait time in milliseconds',
+                            default: 10000,
+                            minimum: 0
+                        },
+                        pollIntervalMs: {
+                            type: 'number',
+                            description: 'Polling interval in milliseconds',
+                            default: 200,
+                            minimum: 1
+                        },
+                        refreshParentFolders: {
+                            type: 'boolean',
+                            description: 'Refresh parent folders before refreshing each asset',
+                            default: true
+                        }
+                    },
+                    required: ['urls']
                 }
             },
             {
@@ -228,6 +263,8 @@ export class AssetAdvancedTools implements ToolExecutor {
                 return await this.openAssetExternal(args.urlOrUUID);
             case 'batch_import_assets':
                 return await this.batchImportAssets(args);
+            case 'refresh_assets_and_wait':
+                return await this.refreshAssetsAndWait(args);
             case 'batch_delete_assets':
                 return await this.batchDeleteAssets(args.urls);
             case 'validate_asset_references':
@@ -308,6 +345,32 @@ export class AssetAdvancedTools implements ToolExecutor {
                 resolve({ success: false, error: err.message });
             });
         });
+    }
+
+    /**
+     * 批量刷新资源后等待 .meta 就绪，方便外部批处理落盘后和编辑器重新对齐。
+     */
+    private async refreshAssetsAndWait(args: AssetDB.RefreshAssetsAndWaitRequest): Promise<ToolResponse> {
+        try {
+            const result = await AssetDB.refreshAssetsAndWait(args);
+            if (!result.metaReady) {
+                return {
+                    success: false,
+                    error: `Timed out waiting for meta files: ${result.pendingUrls.join(', ')}`,
+                    data: result,
+                };
+            }
+
+            return {
+                success: true,
+                data: {
+                    ...result,
+                    message: `Refreshed ${result.readyUrls.length} assets and all meta files are ready`,
+                }
+            };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
     }
 
     private async batchImportAssets(args: any): Promise<ToolResponse> {

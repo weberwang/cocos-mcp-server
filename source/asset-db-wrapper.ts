@@ -31,6 +31,37 @@ export interface CreatedAssetResult {
     metaReady?: boolean;
 }
 
+/**
+ * 批量刷新资源并等待对应 .meta 就绪的请求参数。
+ */
+export interface RefreshAssetsAndWaitRequest {
+    urls: string[];
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+    refreshParentFolders?: boolean;
+}
+
+/**
+ * 批量刷新资源并等待对应 .meta 就绪的执行结果。
+ */
+export interface RefreshAssetsAndWaitResult {
+    readyUrls: string[];
+    pendingUrls: string[];
+    elapsedMs: number;
+    metaReady: boolean;
+}
+
+/**
+ * 允许测试注入刷新和等待能力，避免依赖真实编辑器环境。
+ */
+export interface RefreshAssetsAndWaitDeps {
+    refreshFolder: (folder: string) => Promise<void> | void;
+    refreshAsset: (url: string) => Promise<void> | void;
+    metaExists: (url: string) => boolean;
+    now: () => number;
+    sleep: (ms: number) => Promise<void>;
+}
+
 // ── Path Utilities ─────────────────────────────────────
 export function dbUrlToFsPath(dbUrl: string): string {
     if (dbUrl.startsWith('db://')) {
@@ -68,6 +99,34 @@ function fsPathToDbUrl(fsPath: string): string {
         return 'db://' + fsPath.substring(projectPath.length).replace(/\\/g, '/').replace(/^\//, '');
     }
     return fsPath;
+}
+
+/**
+ * 统一去重并过滤空资源路径，避免批处理时重复刷新同一资源。
+ */
+function uniqueUrls(urls: string[]): string[] {
+    const results: string[] = [];
+    const seen = new Set<string>();
+    for (const url of urls) {
+        const normalized = url.trim();
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        results.push(normalized);
+    }
+    return results;
+}
+
+/**
+ * 从资源 URL 推导父目录，用于先刷新目录再刷新具体资源。
+ */
+function getParentFolderUrl(url: string): string {
+    const lastSlashIndex = url.lastIndexOf('/');
+    if (lastSlashIndex <= 'db://assets'.length) {
+        return 'db://assets';
+    }
+    return url.slice(0, lastSlashIndex);
 }
 
 function getUUIDFromMeta(assetPath: string): string | null {
@@ -340,6 +399,83 @@ export async function saveAsset(url: string, content: string): Promise<void> {
 }
 
 /**
+ * 触发资源刷新并轮询对应 .meta 是否就绪。
+ * 这里显式等待 .meta 文件出现，主要用于批量落盘后的收口步骤。
+ */
+export async function refreshAssetsAndWait(
+    request: RefreshAssetsAndWaitRequest,
+    deps?: RefreshAssetsAndWaitDeps
+): Promise<RefreshAssetsAndWaitResult> {
+    const urls = uniqueUrls(request.urls ?? []);
+    if (urls.length === 0) {
+        throw new Error('At least one asset url is required');
+    }
+
+    const timeoutMs = Math.max(request.timeoutMs ?? 10000, 0);
+    const pollIntervalMs = Math.max(request.pollIntervalMs ?? 200, 1);
+    const resolvedDeps: RefreshAssetsAndWaitDeps = deps ?? {
+        refreshFolder: async (folder: string) => {
+            if (typeof (Editor as any).assetdb?.refresh === 'function') {
+                await (Editor as any).assetdb.refresh(folder);
+                return;
+            }
+            await Editor.Message.request('asset-db', 'refresh-asset', folder);
+        },
+        refreshAsset: async (url: string) => {
+            await Editor.Message.request('asset-db', 'refresh-asset', url);
+        },
+        metaExists: (url: string) => {
+            const metaPath = dbUrlToFsPath(url) + '.meta';
+            return fs.existsSync(metaPath);
+        },
+        now: () => Date.now(),
+        sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+    };
+
+    if (request.refreshParentFolders !== false) {
+        const folders = uniqueUrls(urls.map(getParentFolderUrl));
+        for (const folder of folders) {
+            await resolvedDeps.refreshFolder(folder);
+        }
+    }
+
+    for (const url of urls) {
+        await resolvedDeps.refreshAsset(url);
+    }
+
+    const pending = new Set(urls);
+    const startTime = resolvedDeps.now();
+
+    while (pending.size > 0) {
+        for (const url of Array.from(pending)) {
+            if (resolvedDeps.metaExists(url)) {
+                pending.delete(url);
+            }
+        }
+
+        if (pending.size === 0) {
+            break;
+        }
+
+        const elapsedMs = resolvedDeps.now() - startTime;
+        if (elapsedMs >= timeoutMs) {
+            break;
+        }
+
+        await resolvedDeps.sleep(pollIntervalMs);
+    }
+
+    const elapsedMs = resolvedDeps.now() - startTime;
+    const pendingUrls = urls.filter((url) => pending.has(url));
+    return {
+        readyUrls: urls.filter((url) => !pending.has(url)),
+        pendingUrls,
+        elapsedMs,
+        metaReady: pendingUrls.length === 0,
+    };
+}
+
+/**
  * Re-import asset (triggers Creator to re-read the file).
  */
 export async function reimportAsset(url: string): Promise<void> {
@@ -498,6 +634,7 @@ export default {
     generateAvailableUrl,
     openAssetExternal,
     saveAssetMeta,
+    refreshAssetsAndWait,
     copyAsset,
     moveAsset,
 };

@@ -1427,6 +1427,48 @@ MCP 服务器提供了 **158 个工具**，按功能分为 13 个主要类别：
 
 ---
 
+## 10. 高级资源工具 (Asset Advanced Tools)
+
+### 10.1 asset_refresh_and_wait
+批量刷新资源并等待 `.meta` 文件就绪
+
+适用于脚本、图片、预制体等资源被外部批处理新增或改写到 `assets/` 目录之后，通知 Cocos 编辑器重新扫描，并等待目标资源对应的 `.meta` 文件生成完成。
+
+**参数**:
+- `urls` (string[], 必需): 需要确认 `.meta` 就绪的资源 URL 列表
+- `timeoutMs` (number, 可选): 最大等待时长，单位毫秒，默认为 `10000`
+- `pollIntervalMs` (number, 可选): 轮询间隔，单位毫秒，默认为 `200`
+- `refreshParentFolders` (boolean, 可选): 是否先刷新每个资源的父目录，默认为 `true`
+
+**返回**:
+- `readyUrls`: 已就绪的资源列表
+- `pendingUrls`: 超时后仍未就绪的资源列表
+- `elapsedMs`: 实际等待耗时
+- `metaReady`: 是否全部就绪
+
+**示例**:
+```json
+{
+  "tool": "asset_refresh_and_wait",
+  "arguments": {
+    "urls": [
+      "db://assets/textures/player.png",
+      "db://assets/textures/enemy.png"
+    ],
+    "timeoutMs": 15000,
+    "pollIntervalMs": 250,
+    "refreshParentFolders": true
+  }
+}
+```
+
+**说明**:
+- 该接口不会替代现有的 `project_refresh_assets`
+- 如果只是想触发目录刷新，不关心 `.meta` 是否已经生成，仍然使用 `project_refresh_assets`
+- 如果某个资源需要强制重新走导入器，仍然使用 `project_reimport_asset`
+
+---
+
 ## 使用须知
 
 ### 1. 工具调用格式

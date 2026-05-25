@@ -178,6 +178,7 @@ export class MCPServer {
             'asset_db_ready': ['assetAdvanced', 'query_asset_db_ready'],
             'asset_open_external': ['assetAdvanced', 'open_asset_external'],
             'asset_batch_import': ['assetAdvanced', 'batch_import_assets'],
+            'asset_refresh_and_wait': ['assetAdvanced', 'refresh_assets_and_wait'],
             'asset_batch_delete': ['assetAdvanced', 'batch_delete_assets'],
             'asset_validate_references': ['assetAdvanced', 'validate_asset_references'],
             'asset_get_dependencies': ['assetAdvanced', 'get_asset_dependencies'],

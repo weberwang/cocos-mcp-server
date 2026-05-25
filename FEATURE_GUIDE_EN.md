@@ -1427,6 +1427,48 @@ Get list of active broadcast listeners
 
 ---
 
+## 10. Asset Advanced Tools
+
+### 10.1 asset_refresh_and_wait
+Refresh assets in batch and wait until their `.meta` files are ready
+
+Use this after scripts, images, prefabs, or other assets are added or overwritten in the `assets/` folder by an external batch process. The tool notifies Cocos Creator to rescan the assets and then waits until the target `.meta` files are available.
+
+**Parameters**:
+- `urls` (string[], required): Asset URLs that must have ready `.meta` files
+- `timeoutMs` (number, optional): Maximum wait time in milliseconds, defaults to `10000`
+- `pollIntervalMs` (number, optional): Polling interval in milliseconds, defaults to `200`
+- `refreshParentFolders` (boolean, optional): Whether to refresh each asset's parent folder first, defaults to `true`
+
+**Returns**:
+- `readyUrls`: Assets whose `.meta` files are ready
+- `pendingUrls`: Assets still not ready after timeout
+- `elapsedMs`: Actual wait duration
+- `metaReady`: Whether all target assets are ready
+
+**Example**:
+```json
+{
+  "tool": "asset_refresh_and_wait",
+  "arguments": {
+    "urls": [
+      "db://assets/textures/player.png",
+      "db://assets/textures/enemy.png"
+    ],
+    "timeoutMs": 15000,
+    "pollIntervalMs": 250,
+    "refreshParentFolders": true
+  }
+}
+```
+
+**Notes**:
+- This tool does not replace `project_refresh_assets`
+- If you only need to trigger a folder refresh and do not need to wait for `.meta` generation, keep using `project_refresh_assets`
+- If a resource must be forced through the importer again, keep using `project_reimport_asset`
+
+---
+
 ## Usage Guidelines
 
 ### 1. Tool Call Format
