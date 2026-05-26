@@ -3,7 +3,7 @@ import * as path from 'path';
 import { MCPServerSettings, ToolManagerSettings, ToolConfiguration, ToolConfig } from './types';
 
 const DEFAULT_SETTINGS: MCPServerSettings = {
-    port: 7788,
+    port: 9527,
     autoStart: false,
     enableDebugLog: false,
     allowedOrigins: ['*'],
