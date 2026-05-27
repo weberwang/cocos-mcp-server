@@ -84,7 +84,7 @@ module.exports = Editor.Panel.define({
                     const configLocation = ref<ConfigLocation>('local');
 
                     const settings = ref<ServerSettings>({
-                        port: 7788,
+                        port: 9527,
                         autoStart: false,
                         debugLog: false,
                         maxConnections: 10,
@@ -335,7 +335,7 @@ module.exports = Editor.Panel.define({
                             const serverStatusResult = await Editor.Message.request('cocos-mcp-server', 'getServerStatus');
                             if (serverStatusResult && serverStatusResult.settings) {
                                 settings.value = {
-                                    port: serverStatusResult.settings.port || 7788,
+                                    port: serverStatusResult.settings.port || 9527,
                                     autoStart: serverStatusResult.settings.autoStart || false,
                                     debugLog: serverStatusResult.settings.enableDebugLog || false,
                                     maxConnections: serverStatusResult.settings.maxConnections || 10,

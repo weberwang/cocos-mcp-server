@@ -17,9 +17,18 @@ interface ConfigureClientsResponse {
     error?: string;
 }
 
+/**
+ * 项目内 MCP 服务配置。
+ * 这里只读取 Codex 接入所需的最小字段，避免把面板配置和客户端写入逻辑耦得过深。
+ */
+interface McpServerProjectSettings {
+    port?: number;
+}
+
 const OPEN_CODE_SCHEMA = 'https://opencode.ai/config.json';
 const MCP_SERVER_NAME = 'cocos-mcp';
 const COMMAND_NAME = 'node';
+const DEFAULT_MCP_PORT = 9527;
 
 function getProjectAdapterPath(): string {
     return path.join(Editor.Project.path, 'extensions', 'cocos-mcp-server', 'stdio-adapter', 'build', 'index.js');
@@ -83,33 +92,107 @@ function formatTomlArray(values: string[]): string {
     return `[${values.map(formatTomlString).join(', ')}]`;
 }
 
+/**
+ * 读取项目当前保存的 MCP 端口。
+ * HTTP 与 stdio 两种接入都会依赖这个端口，因此统一从项目设置里读取。
+ */
+function getProjectMcpPort(): string {
+    const settingsPath = path.join(Editor.Project.path, 'settings', 'mcp-server.json');
+    if (!fs.existsSync(settingsPath)) {
+        return String(DEFAULT_MCP_PORT);
+    }
+
+    try {
+        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as McpServerProjectSettings;
+        if (typeof settings.port === 'number' && Number.isInteger(settings.port) && settings.port > 0) {
+            return String(settings.port);
+        }
+    } catch (error) {
+        console.warn(`[MCP] Failed to parse server settings, using default port: ${settingsPath}`, error);
+    }
+
+    return String(DEFAULT_MCP_PORT);
+}
+
+/**
+ * 生成项目当前 MCP HTTP 地址。
+ * Codex 原生支持 HTTP MCP，这里优先输出直连地址，避免再经过 stdio 适配层。
+ */
+function getProjectMcpUrl(): string {
+    return `http://127.0.0.1:${getProjectMcpPort()}/mcp`;
+}
+
+/**
+ * 在 TOML 中更新指定 MCP 服务器块，同时覆盖它的子表，例如 `.env`。
+ * 这样再次写入时不会残留旧协议配置或旧子表。
+ */
 function upsertTomlMcpServerBlock(
     existingContent: string,
     serverName: string,
     lines: string[],
 ): string {
-    const trimmed = existingContent.replace(/\s+$/, '');
     const header = `[mcp_servers.${serverName}]`;
-    const escapedHeader = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const blockPattern = new RegExp(`(?:^|\\n)${escapedHeader}\\n(?:[^\\[]*(?:\\n|$))*`, 'm');
-    const newBlock = `${header}\n${lines.join('\n')}`;
+    const sectionName = `mcp_servers.${serverName}`;
+    const normalizedContent = existingContent.replace(/\r\n/g, '\n').replace(/\s+$/, '');
+    const sourceLines = normalizedContent ? normalizedContent.split('\n') : [];
+    const newBlockLines = [header, ...lines];
 
-    if (blockPattern.test(trimmed)) {
-        return trimmed.replace(blockPattern, (match) => {
-            const prefix = match.startsWith('\n') ? '\n' : '';
-            return `${prefix}${newBlock}\n`;
-        }).replace(/\s+$/, '') + '\n';
+    const parseSectionName = (line: string): string | null => {
+        const match = line.match(/^\[([^\]]+)\]$/);
+        return match ? match[1] : null;
+    };
+
+    let blockStart = -1;
+    let blockEnd = sourceLines.length;
+
+    for (let index = 0; index < sourceLines.length; index += 1) {
+        const section = parseSectionName(sourceLines[index]);
+        if (!section) {
+            continue;
+        }
+
+        if (section === sectionName) {
+            blockStart = index;
+            for (let cursor = index + 1; cursor < sourceLines.length; cursor += 1) {
+                const nextSection = parseSectionName(sourceLines[cursor]);
+                if (nextSection && nextSection !== sectionName && !nextSection.startsWith(`${sectionName}.`)) {
+                    blockEnd = cursor;
+                    break;
+                }
+            }
+            break;
+        }
     }
 
-    const hasMcpSection = /\[mcp_servers\]/.test(trimmed);
-    let nextContent = trimmed;
+    if (blockStart >= 0) {
+        const updatedLines = [
+            ...sourceLines.slice(0, blockStart),
+            ...newBlockLines,
+            ...sourceLines.slice(blockEnd),
+        ];
+        return `${updatedLines.join('\n').replace(/\s+$/, '')}\n`;
+    }
+
+    const hasMcpSection = sourceLines.some((line) => line.trim() === '[mcp_servers]');
+    const appendedLines = [...sourceLines];
+
     if (!hasMcpSection) {
-        nextContent = nextContent ? `${nextContent}\n\n[mcp_servers]` : '[mcp_servers]';
+        if (appendedLines.length > 0 && appendedLines[appendedLines.length - 1].trim() !== '') {
+            appendedLines.push('');
+        }
+        appendedLines.push('[mcp_servers]', '');
+    } else if (appendedLines.length > 0 && appendedLines[appendedLines.length - 1].trim() !== '') {
+        appendedLines.push('');
     }
 
-    return `${nextContent}\n\n${newBlock}\n`;
+    appendedLines.push(...newBlockLines);
+    return `${appendedLines.join('\n').replace(/\s+$/, '')}\n`;
 }
 
+/**
+ * 写入 OpenCode 配置。
+ * 这里保持原有结构，只负责把 stdio 适配器注册给 OpenCode。
+ */
 function writeOpenCodeConfig(configPath: string, adapterPath: string): void {
     const config = readJsonConfig(configPath, { $schema: OPEN_CODE_SCHEMA });
     const normalizedConfig = { ...config, $schema: OPEN_CODE_SCHEMA } as Record<string, any>;
@@ -127,23 +210,25 @@ function writeOpenCodeConfig(configPath: string, adapterPath: string): void {
     fs.writeFileSync(configPath, JSON.stringify(normalizedConfig, null, 2));
 }
 
-function writeCodexConfig(configPath: string, adapterPath: string): void {
+/**
+ * 写入 Codex 项目配置。
+ * Codex 直接使用 HTTP MCP，避免依赖额外的 stdio 适配器构建产物。
+ */
+function writeCodexConfig(configPath: string): void {
     const existingContent = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
     const blockLines = [
-        'type = "stdio"',
-        `command = ${formatTomlString(COMMAND_NAME)}`,
-        `args = ${formatTomlArray([adapterPath])}`,
+        `url = ${formatTomlString(getProjectMcpUrl())}`,
     ];
 
     const nextContent = upsertTomlMcpServerBlock(existingContent, MCP_SERVER_NAME, blockLines);
     fs.writeFileSync(configPath, nextContent);
 }
 
+/**
+ * 按客户端类型写入配置。
+ * OpenCode 继续走本地 stdio 代理；Codex 则改为直接写入 HTTP MCP 地址。
+ */
 function configureSingleClient(target: 'opencode' | 'codex', location: ConfigLocation): ConfigureClientResult {
-    const adapterAbsolutePath = getProjectAdapterPath();
-    ensureAdapterExists(adapterAbsolutePath);
-
-    const adapterPath = getProjectRelativeAdapterPath(adapterAbsolutePath);
     const configPath = target === 'opencode'
         ? getOpenCodeConfigPath(location)
         : getCodexConfigPath(location);
@@ -151,9 +236,12 @@ function configureSingleClient(target: 'opencode' | 'codex', location: ConfigLoc
     ensureParentDirectoryExists(configPath);
 
     if (target === 'opencode') {
+        const adapterAbsolutePath = getProjectAdapterPath();
+        ensureAdapterExists(adapterAbsolutePath);
+        const adapterPath = getProjectRelativeAdapterPath(adapterAbsolutePath);
         writeOpenCodeConfig(configPath, adapterPath);
     } else {
-        writeCodexConfig(configPath, adapterPath);
+        writeCodexConfig(configPath);
     }
 
     return {

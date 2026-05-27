@@ -7,7 +7,7 @@
 
 import * as http from 'node:http';
 
-const PORT = parseInt(process.env['COCOS_MCP_PORT'] ?? '7788', 10);
+const PORT = parseInt(process.env['COCOS_MCP_PORT'] ?? '9527', 10);
 const BASE = `http://127.0.0.1:${PORT}`;
 
 function log(msg: string): void {

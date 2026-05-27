@@ -98,7 +98,7 @@ The adapter outputs to `stdio-adapter/build/index.js`.
 
 Current defaults from source:
 
-- default port: `7788`
+- default port: `9527`
 - `autoStart`: `false`
 - `enableDebugLog`: `false`
 - `maxConnections`: `10`
@@ -162,7 +162,7 @@ Once the extension is started, it exposes a local HTTP service.
 Default endpoint:
 
 ```text
-http://127.0.0.1:7788/mcp
+http://127.0.0.1:9527/mcp
 ```
 
 It also exposes helper endpoints:
@@ -190,7 +190,7 @@ It reads the port from:
 COCOS_MCP_PORT
 ```
 
-and falls back to `7788`.
+and falls back to `9527`.
 
 ## Client Configuration Examples
 
@@ -203,7 +203,7 @@ Claude Code officially supports loading MCP servers from a `.mcp.json` file at t
   "mcpServers": {
     "cocos-mcp": {
       "type": "http",
-      "url": "http://127.0.0.1:7788/mcp"
+      "url": "http://127.0.0.1:9527/mcp"
     }
   }
 }
@@ -216,7 +216,7 @@ If you want the port to track an environment variable, you can also use:
   "mcpServers": {
     "cocos-mcp": {
       "type": "http",
-      "url": "http://127.0.0.1:${COCOS_MCP_PORT:-7788}/mcp"
+      "url": "http://127.0.0.1:${COCOS_MCP_PORT:-9527}/mcp"
     }
   }
 }
@@ -233,7 +233,7 @@ This is a good fit when:
 If you prefer the built-in Claude Code CLI workflow, you can add the server directly as a project-scoped HTTP MCP server:
 
 ```bash
-claude mcp add --transport http --scope project cocos-mcp http://127.0.0.1:7788/mcp
+claude mcp add --transport http --scope project cocos-mcp http://127.0.0.1:9527/mcp
 ```
 
 Useful follow-up commands:
@@ -286,7 +286,7 @@ Project-local `opencode.json` is written in this shape:
 If the client supports HTTP MCP, point it at:
 
 ```text
-http://127.0.0.1:7788/mcp
+http://127.0.0.1:9527/mcp
 ```
 
 For Claude Code specifically, the official guidance currently favors HTTP transport over SSE when HTTP is available.
@@ -396,7 +396,7 @@ Check these first:
 
 1. the main extension has been built with `npm install && npm run build`
 2. the extension is actually loaded by Cocos Creator
-3. port `7788` is not already in use
+3. port `9527` is not already in use
 4. `settings/mcp-server.json` does not contain broken values
 
 ### The client cannot connect
@@ -404,7 +404,7 @@ Check these first:
 Check these first:
 
 1. the service is running in the panel
-2. `http://127.0.0.1:7788/health` responds
+2. `http://127.0.0.1:9527/health` responds
 3. for `stdio` clients, `stdio-adapter/build/index.js` exists
 4. if using a non-default port, `COCOS_MCP_PORT` is also updated
 
