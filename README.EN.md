@@ -51,44 +51,92 @@ cocos-mcp-server/
 
 ## Installation
 
-### 1. Place it under `extensions/`
+This README now uses a **remote-install-only** workflow. The installer downloads `plugin-package/` from the repository's default GitHub branch and installs it into the target Cocos Creator project's `extensions/cocos-mcp-server`.
 
-Copy the entire folder into your Cocos Creator project:
+By default, the target project is the **current working directory**, so the plugin is installed at:
 
 ```text
-YourProject/
-├── assets/
-├── extensions/
-│   └── cocos-mcp-server/
-└── settings/
+<current-directory>/extensions/cocos-mcp-server
 ```
 
-### 2. Install main extension dependencies
+If you want to install into a different project, override the target project root with `COCOS_PROJECT_PATH`.
+
+### PowerShell
+
+Run this from the target Cocos Creator project root:
+
+```powershell
+irm https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.ps1 | iex
+```
+
+Install into a specific project directory:
+
+```powershell
+$env:COCOS_PROJECT_PATH = 'D:\Projects\Cocos\AnotherGame'
+irm https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.ps1 | iex
+```
+
+### Shell
+
+Run this from the target Cocos Creator project root:
 
 ```bash
-cd extensions/cocos-mcp-server
-npm install
+curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | sh
 ```
 
-### 3. Build the main extension
+Install into a specific project directory:
 
 ```bash
-npm run build
+COCOS_PROJECT_PATH=/path/to/AnotherGame curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | sh
 ```
 
-The main extension outputs compiled files into `dist/`.
+### Notes
 
-### 4. Build the stdio adapter
+- Remote install places the plugin under `extensions/cocos-mcp-server`
+- If that directory already exists, the installer swaps directories atomically instead of overwriting in place
+- If you are developing this source repository, `npm install`, `npm run build`, and the `stdio-adapter` build steps are still repository-development tasks, not end-user installation steps
 
-If you want to connect `stdio`-based MCP clients, build the adapter as well:
+## Source Repository Maintenance Commands
+
+The following commands are only for **maintaining this source repository**, not for normal project installation:
+
+- `npm run publish`
+- `npm run package:remote`
+
+Notes:
+
+- These maintenance commands only exist in the source repository
+- `plugin-package/` distributions and already-installed `extensions/cocos-mcp-server` plugin directories do not include these scripts
+
+### Publish into a target project
+
+Run this in the **source repository root** to publish into the current project's `extensions/cocos-mcp-server`:
 
 ```bash
-cd stdio-adapter
-npm install
-npm run build
+npm run publish
 ```
 
-The adapter outputs to `stdio-adapter/build/index.js`.
+To publish into another project, pass that project root explicitly from the **source repository root**:
+
+```bash
+npm run publish -- D:/Projects/Cocos/AnotherGame
+```
+
+If you are already in the target project root, you can also call the source-repo script directly:
+
+```bash
+node D:/Projects/Cocos/cocos-mcp-server/scripts/publish.js .
+```
+
+### Refresh the remote package directory
+
+Run this in the **source repository root**:
+
+```bash
+npm run package:remote
+```
+
+This refreshes the repository's `plugin-package/` directory for remote distribution or packaging.
 
 ## Enabling It in Cocos Creator
 

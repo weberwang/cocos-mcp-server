@@ -7,7 +7,10 @@
     "editor": ">=3.8.6",
     "scripts": {
         "build": "tsc",
-        "watch": "tsc -w"
+        "watch": "tsc -w",
+        "test:release": "node --test scripts/tests/*.test.js",
+        "publish": "node scripts/publish.js",
+        "package:remote": "node scripts/package-remote.js"
     },
     "description": "Cocos Creator MCP server — provides scene, node, component, asset, prefab, and debug tools via HTTP gateway and scene scripting.",
     "main": "./dist/main.js",

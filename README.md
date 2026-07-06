@@ -51,44 +51,92 @@ cocos-mcp-server/
 
 ## 安装
 
-### 1. 放入项目扩展目录
+当前 README 统一使用**远程安装口径**。安装脚本会从 GitHub 默认分支下载分发包里的 `plugin-package/`，并安装到目标 Creator 项目的 `extensions/cocos-mcp-server`。
 
-把整个目录放到你的 Cocos Creator 项目下：
+默认情况下，目标项目目录就是你执行命令时的**当前目录**，最终安装位置如下：
 
 ```text
-YourProject/
-├── assets/
-├── extensions/
-│   └── cocos-mcp-server/
-└── settings/
+<当前目录>/extensions/cocos-mcp-server
 ```
 
-### 2. 安装主插件依赖
+如果要安装到别的项目目录，可通过环境变量 `COCOS_PROJECT_PATH` 覆盖目标项目根目录。
+
+### PowerShell
+
+在目标 Cocos Creator 项目根目录执行：
+
+```powershell
+irm https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.ps1 | iex
+```
+
+安装到指定项目目录：
+
+```powershell
+$env:COCOS_PROJECT_PATH = 'D:\Projects\Cocos\AnotherGame'
+irm https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.ps1 | iex
+```
+
+### Shell
+
+在目标 Cocos Creator 项目根目录执行：
 
 ```bash
-cd extensions/cocos-mcp-server
-npm install
+curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | sh
 ```
 
-### 3. 构建主插件
+安装到指定项目目录：
 
 ```bash
-npm run build
+COCOS_PROJECT_PATH=/path/to/AnotherGame curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | sh
 ```
 
-主插件编译产物会输出到 `dist/`。
+### 补充说明
 
-### 4. 构建 stdio 适配器
+- 远程安装默认会把插件放到目标项目的 `extensions/cocos-mcp-server`
+- 已存在同名插件目录时，安装脚本会做目录切换，避免直接覆盖中断后留下半安装状态
+- 如果你是在**源码仓库开发**，`npm install`、`npm run build`、`stdio-adapter` 构建步骤仍只用于本仓库开发，不属于普通安装流程
 
-如果你要让支持 `stdio` 的 MCP 客户端接入，还需要单独构建适配器：
+## 源码仓库维护命令
+
+下面这些命令仅适用于**源码仓库维护流程**，不属于普通项目安装步骤：
+
+- `npm run publish`
+- `npm run package:remote`
+
+说明：
+
+- 这些维护命令只存在于源码仓库
+- `plugin-package/` 分发包和已经安装到 `extensions/cocos-mcp-server` 的插件目录不包含这些维护脚本
+
+### 一键发布到目标项目
+
+在 **源码仓库根目录** 执行，发布到当前项目的 `extensions/cocos-mcp-server`：
 
 ```bash
-cd stdio-adapter
-npm install
-npm run build
+npm run publish
 ```
 
-适配器编译产物会输出到 `stdio-adapter/build/index.js`。
+如果要发布到别的项目，可在 **源码仓库根目录** 显式传入目标项目根目录：
+
+```bash
+npm run publish -- D:/Projects/Cocos/AnotherGame
+```
+
+如果你当前就在目标项目根目录，也可以直接调用源码仓库里的脚本：
+
+```bash
+node D:/Projects/Cocos/cocos-mcp-server/scripts/publish.js .
+```
+
+### 生成远程发布目录
+
+在 **源码仓库根目录** 执行：
+
+```bash
+npm run package:remote
+```
+
+该命令会刷新仓库内的 `plugin-package/` 目录，用于远程分发或打包发布。
 
 ## 在 Cocos Creator 中启用
 
