@@ -1,4 +1,5 @@
-import { join } from 'path';
+import { readFileSync, writeFileSync } from 'fs';
+import { isAbsolute, join, sep } from 'path';
 module.paths.push(join(Editor.App.path, 'node_modules'));
 
 /**
@@ -208,6 +209,187 @@ async function queryCurrentSceneSerializedData(): Promise<string | null> {
     }
 }
 
+/**
+ * 把 db:// 资源路径转换成项目内真实文件路径。
+ * 这里只处理当前修复流程会用到的 assets 路径，避免误写到项目外部。
+ */
+function resolveProjectAssetFilePath(assetPath: string): string {
+    if (!assetPath || typeof assetPath !== 'string') {
+        throw new Error('assetPath must be a non-empty string');
+    }
+
+    if (isAbsolute(assetPath)) {
+        return assetPath;
+    }
+
+    if (assetPath.startsWith('db://assets/')) {
+        const relativePath = assetPath.slice('db://assets/'.length).replace(/\//g, sep);
+        return join(Editor.Project.path, 'assets', relativePath);
+    }
+
+    throw new Error(`Unsupported asset path: ${assetPath}`);
+}
+
+/**
+ * 把 compact 序列化资源转回 Creator 可编辑的标准 JSON。
+ * 根因是当前仓库里的 prefab/scene 源文件是运行时紧凑格式，编辑器导入器会直接报错。
+ */
+function repairSerializedAssetFile(assetPath: string) {
+    const absolutePath = resolveProjectAssetFilePath(assetPath);
+    const raw = readFileSync(absolutePath, 'utf8');
+    let parsed: any;
+
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error: any) {
+        throw new Error(`Failed to parse JSON: ${error.message}`);
+    }
+
+    const { deserialize } = require('cc');
+    if (typeof deserialize !== 'function') {
+        throw new Error('cc.deserialize is unavailable in current scene context');
+    }
+
+    const editorSerialize = (Editor as any)?.serialize;
+    if (typeof Editor === 'undefined' || typeof editorSerialize !== 'function') {
+        throw new Error('Editor.serialize is unavailable in current scene context');
+    }
+
+    const asset = deserialize(parsed);
+    const serializedData = editorSerialize(asset, { stringify: false });
+    const serialized = JSON.stringify(serializedData, null, 2);
+
+    if (typeof serialized !== 'string' || !serialized.trim()) {
+        throw new Error('EditorExtends.serialize returned empty content');
+    }
+
+    JSON.parse(serialized);
+    writeFileSync(absolutePath, serialized, 'utf8');
+
+    return {
+        assetPath,
+        absolutePath,
+        bytesBefore: Buffer.byteLength(raw, 'utf8'),
+        bytesAfter: Buffer.byteLength(serialized, 'utf8'),
+    };
+}
+
+/**
+ * 将对象图手动展开成 Creator 可识别的标准 JSON。
+ * 这里不依赖 Editor.serialize，专门兜底当前环境只有 EditorExtends.serialize 的场景进程。
+ */
+function convertAssetToPlainSerializedJson(parsedSource: any): string {
+    const cc = require('cc');
+    const deserialize = cc.deserialize;
+    const DetailsCtor = deserialize?.Details;
+    if (typeof deserialize !== 'function' || typeof DetailsCtor !== 'function') {
+        throw new Error('cc.deserialize or deserialize.Details is unavailable');
+    }
+
+    const details = new DetailsCtor();
+    const asset = deserialize(parsedSource, details);
+    const jsUtils = cc.js;
+    const assetRefMap = new WeakMap<object, Map<string, string>>();
+
+    if (details && Array.isArray(details.uuidObjList)) {
+        for (let index = 0; index < details.uuidObjList.length; index += 1) {
+            const owner = details.uuidObjList[index];
+            const prop = details.uuidPropList[index];
+            const uuid = details.uuidList[index];
+            if (!owner || typeof prop !== 'string' || !uuid) {
+                continue;
+            }
+
+            let ownerMap = assetRefMap.get(owner);
+            if (!ownerMap) {
+                ownerMap = new Map();
+                assetRefMap.set(owner, ownerMap);
+            }
+            ownerMap.set(prop, uuid);
+        }
+    }
+
+    const objectIds = new WeakMap<object, number>();
+    const serializedEntries: any[] = [];
+
+    const shouldTreatAsAssetReference = (value: any, isRoot: boolean): boolean => Boolean(
+        !isRoot
+        && value
+        && typeof value === 'object'
+        && typeof value._uuid === 'string'
+        && typeof value.constructor === 'function'
+        && /Asset|SpriteFrame|Material|Texture|Prefab|Scene|SkeletonData/.test(value.constructor.name || '')
+    );
+
+    const getTypeName = (value: any): string | null => {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+
+        return jsUtils?.getClassName?.(value.constructor) || value.constructor?.name || null;
+    };
+
+    const encodeValue = (value: any, isRoot: boolean = false): any => {
+        if (value === null || value === undefined) {
+            return null;
+        }
+
+        if (typeof value !== 'object') {
+            return value;
+        }
+
+        if (shouldTreatAsAssetReference(value, isRoot)) {
+            return { __uuid__: value._uuid };
+        }
+
+        const existingId = objectIds.get(value);
+        if (existingId !== undefined) {
+            return { __id__: existingId };
+        }
+
+        const id = serializedEntries.length;
+        objectIds.set(value, id);
+
+        const container: any[] | Record<string, any> = Array.isArray(value) ? [] : {};
+        serializedEntries.push(container);
+
+        if (!Array.isArray(value)) {
+            const typeName = getTypeName(value);
+            if (typeName) {
+                (container as Record<string, any>).__type__ = typeName;
+            }
+        }
+
+        const keys = Array.isArray(value) ? value.keys() : Object.keys(value);
+        for (const keyOrIndex of keys) {
+            const key = keyOrIndex as string | number;
+            const rawValue = value[key];
+            if (typeof rawValue === 'function' || rawValue === undefined) {
+                continue;
+            }
+
+            if (!Array.isArray(value)) {
+                const ownerRefs = assetRefMap.get(value);
+                if (ownerRefs && ownerRefs.has(String(key))) {
+                    (container as Record<string, any>)[key] = { __uuid__: ownerRefs.get(String(key)) };
+                    continue;
+                }
+            }
+
+            if (Array.isArray(value)) {
+                (container as any[]).push(encodeValue(rawValue, false));
+            } else {
+                (container as Record<string, any>)[key] = encodeValue(rawValue, false);
+            }
+        }
+
+        return isRoot ? container : { __id__: id };
+    };
+
+    encodeValue(asset, true);
+    return JSON.stringify(serializedEntries, null, 2);
+}
+
 export const methods: { [key: string]: (...any: any) => any } = {
     /**
      * 供 scene-view 截图使用，返回 Canvas 节点矩形与当前 Scene 编辑相机信息。
@@ -322,6 +504,101 @@ export const methods: { [key: string]: (...any: any) => any } = {
                 success: true, 
                 message: `Component ${componentType} added successfully`,
                 data: { componentId: component.uuid }
+            };
+        } catch (error: any) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    /**
+     * 读取当前场景的序列化 JSON。
+     * 主进程保存场景副本时依赖这份内容，避免退回会打断自动化流程的另存为弹窗。
+     */
+    async getCurrentSceneSerializedData() {
+        try {
+            const serializedData = await queryCurrentSceneSerializedData();
+            if (!serializedData) {
+                return { success: false, error: 'Current scene serialized data is unavailable' };
+            }
+
+            return {
+                success: true,
+                data: {
+                    serializedData,
+                },
+            };
+        } catch (error: any) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    /**
+     * 修复单个 prefab/scene 源文件，把紧凑格式回写成编辑器标准格式。
+     */
+    repairSerializedAsset(assetPath: string) {
+        try {
+            return {
+                success: true,
+                data: repairSerializedAssetFile(assetPath),
+            };
+        } catch (error: any) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    /**
+     * 使用手动对象图展开的方式，把 compact 资源回写为标准 JSON。
+     * 当 Editor.serialize 不可用时，使用这条兜底路径。
+     */
+    repairSerializedAssetToPlainJson(assetPath: string) {
+        try {
+            const absolutePath = resolveProjectAssetFilePath(assetPath);
+            const raw = readFileSync(absolutePath, 'utf8');
+            const parsed = JSON.parse(raw);
+            const serialized = convertAssetToPlainSerializedJson(parsed);
+
+            JSON.parse(serialized);
+            writeFileSync(absolutePath, serialized, 'utf8');
+
+            return {
+                success: true,
+                data: {
+                    assetPath,
+                    absolutePath,
+                    bytesBefore: Buffer.byteLength(raw, 'utf8'),
+                    bytesAfter: Buffer.byteLength(serialized, 'utf8'),
+                },
+            };
+        } catch (error: any) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    /**
+     * 批量修复多个 prefab/scene 文件，并返回逐项结果，便于先小范围验证再全量执行。
+     */
+    repairSerializedAssets(assetPaths: string[]) {
+        try {
+            if (!Array.isArray(assetPaths) || assetPaths.length === 0) {
+                return { success: false, error: 'assetPaths must be a non-empty array' };
+            }
+
+            const results = assetPaths.map((assetPath: string) => {
+                try {
+                    return { assetPath, success: true, data: repairSerializedAssetFile(assetPath) };
+                } catch (error: any) {
+                    return { assetPath, success: false, error: error.message };
+                }
+            });
+
+            return {
+                success: true,
+                data: {
+                    total: results.length,
+                    repaired: results.filter((item) => item.success).length,
+                    failed: results.filter((item) => !item.success).length,
+                    results,
+                },
             };
         } catch (error: any) {
             return { success: false, error: error.message };

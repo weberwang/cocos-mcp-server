@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as zlib from 'zlib';
 
 import * as AssetDB from '../asset-db-wrapper';
+import { saveSceneAssetDirect } from './scene-tools';
 import { ToolDefinition, ToolExecutor, ToolResponse } from '../types';
 
 /**
@@ -13,6 +14,17 @@ export interface SaveAsFallbackDeps {
     getCurrentSceneUuid: () => Promise<string | null>;
     getSceneAssetUrl: (uuid: string) => Promise<string | null>;
     ensureSceneAssetExists: (url: string) => Promise<void>;
+}
+
+/**
+ * 扩展重载所依赖的最小宿主接口。
+ * 抽成纯依赖后可以在测试里验证 disable/enable 顺序，而不依赖真实 Creator 环境。
+ */
+export interface ReloadExtensionDeps {
+    getExtensionPath: (extensionName: string) => string | undefined;
+    disableExtension: (extensionPath: string) => void;
+    enableExtension: (extensionPath: string) => void;
+    scheduleReload?: (extensionPath: string) => void;
 }
 
 export type CaptureScreenshotMode = 'editor' | 'scene-view' | 'game-view';
@@ -145,6 +157,50 @@ export interface RawPixelCaptureResult {
     pixelsBase64: string;
     flipY?: boolean;
     cameraName?: string;
+}
+
+const CURRENT_EXTENSION_NAME = 'cocos-mcp-server';
+const CURRENT_EXTENSION_SELF_RELOAD_DELAY_MS = 150;
+
+/**
+ * 通过 disable + enable 实现扩展重载。
+ * 普通扩展直接同步切换；当前扩展则改为延迟调度，避免在响应返回前把自己卸载。
+ */
+export async function reloadExtensionByName(
+    extensionName: string,
+    currentExtensionName: string,
+    deps: ReloadExtensionDeps,
+): Promise<{ extensionName: string; extensionPath: string; scheduled?: boolean }> {
+    const normalizedExtensionName = String(extensionName || '').trim();
+    if (!normalizedExtensionName) {
+        throw new Error('extensionName is required');
+    }
+
+    const extensionPath = deps.getExtensionPath(normalizedExtensionName);
+    if (!extensionPath) {
+        throw new Error(`Extension not found: ${normalizedExtensionName}`);
+    }
+
+    if (normalizedExtensionName === currentExtensionName) {
+        if (typeof deps.scheduleReload !== 'function') {
+            throw new Error('Self reload is unavailable because no deferred scheduler was provided');
+        }
+
+        deps.scheduleReload(extensionPath);
+        return {
+            extensionName: normalizedExtensionName,
+            extensionPath,
+            scheduled: true,
+        };
+    }
+
+    deps.disableExtension(extensionPath);
+    deps.enableExtension(extensionPath);
+
+    return {
+        extensionName: normalizedExtensionName,
+        extensionPath,
+    };
 }
 
 /**
@@ -731,6 +787,20 @@ export class EditorTools implements ToolExecutor {
                 inputSchema: { type: 'object', properties: {} }
             },
             {
+                name: 'reload_extension',
+                description: 'Reload a Cocos Creator extension by disabling and enabling it again',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        extensionName: {
+                            type: 'string',
+                            description: 'Extension package name to reload'
+                        }
+                    },
+                    required: ['extensionName']
+                }
+            },
+            {
                 name: 'capture_screenshot',
                 description: 'Capture the current Cocos Creator editor window, scene-view canvas, or exact runtime game canvas to a PNG file',
                 inputSchema: {
@@ -773,6 +843,8 @@ export class EditorTools implements ToolExecutor {
                 return this.redo();
             case 'save_scene':
                 return this.saveScene();
+            case 'reload_extension':
+                return this.reloadExtension(args.extensionName);
             case 'capture_screenshot':
                 return this.captureScreenshot(args);
             default:
@@ -856,13 +928,16 @@ export class EditorTools implements ToolExecutor {
     }
 
     /**
-     * 保存当前场景；如果原始资源缺失，则退回“另存为”。
+     * 保存当前场景；如果原始资源缺失，则优先尝试无弹窗直存。
+     * 只有无法推导出原始场景路径时才返回明确错误，不再打开保存窗口打断自动化。
      */
     private async saveScene(): Promise<ToolResponse> {
         try {
             await Editor.Message.request('scene', 'save-scene');
             return { success: true, message: 'Scene saved' };
         } catch (error: any) {
+            const sceneUuid = await this.getCurrentSceneUuid();
+            const sceneAssetUrl = sceneUuid ? await AssetDB.queryUrl(sceneUuid) : null;
             const shouldFallbackToSaveAs = await shouldFallbackToSaveAsWhenOriginalSceneMissing({
                 getCurrentSceneUuid: async () => this.getCurrentSceneUuid(),
                 getSceneAssetUrl: async (uuid: string) => AssetDB.queryUrl(uuid),
@@ -875,15 +950,74 @@ export class EditorTools implements ToolExecutor {
                 return { success: false, error: error.message };
             }
 
+            if (!sceneAssetUrl) {
+                return {
+                    success: false,
+                    error: 'Current scene source asset is missing. Use scene_save_scene_as with an explicit db://...scene path because dialog save is disabled.',
+                };
+            }
+
             try {
-                await (Editor.Message.request as any)('scene', 'save-as-scene');
+                const result = await Editor.Message.request('scene', 'execute-scene-script', {
+                    name: 'cocos-mcp-server',
+                    method: 'getCurrentSceneSerializedData',
+                    args: [],
+                });
+
+                if (!result?.success || typeof result?.data?.serializedData !== 'string') {
+                    return {
+                        success: false,
+                        error: result?.error || 'Current scene serialized data is unavailable',
+                    };
+                }
+
+                const savedScene = await saveSceneAssetDirect({
+                    path: sceneAssetUrl,
+                    serializedData: result.data.serializedData,
+                });
+
                 return {
                     success: true,
-                    message: 'Scene save dialog opened because the original scene asset is missing'
+                    message: `Scene saved directly to ${savedScene.path} because dialog save is disabled`
                 };
             } catch (saveAsError: any) {
                 return { success: false, error: saveAsError.message };
             }
+        }
+    }
+
+    /**
+     * 重载指定扩展。
+     * 当前版本只允许重载其他扩展，避免请求执行过程中把自身卸载导致 MCP 调用中断。
+     */
+    private async reloadExtension(extensionName: string): Promise<ToolResponse> {
+        try {
+            const result = await reloadExtensionByName(extensionName, CURRENT_EXTENSION_NAME, {
+                getExtensionPath: (targetExtensionName: string) => Editor.Package.getPath(targetExtensionName),
+                disableExtension: (extensionPath: string) => Editor.Package.disable(extensionPath),
+                enableExtension: (extensionPath: string) => Editor.Package.enable(extensionPath),
+                scheduleReload: (extensionPath: string) => {
+                    // 当前扩展需要先把 MCP 响应返回给调用方，再延迟执行自重载，避免请求处理中断。
+                    setTimeout(() => {
+                        try {
+                            Editor.Package.disable(extensionPath);
+                            Editor.Package.enable(extensionPath);
+                        } catch (error: any) {
+                            console.error(`[MCP] Failed to self-reload extension '${CURRENT_EXTENSION_NAME}':`, error);
+                        }
+                    }, CURRENT_EXTENSION_SELF_RELOAD_DELAY_MS);
+                },
+            });
+
+            return {
+                success: true,
+                data: result,
+                message: result.scheduled
+                    ? `Extension reload scheduled: ${result.extensionName}`
+                    : `Extension reloaded: ${result.extensionName}`,
+            };
+        } catch (error: any) {
+            return { success: false, error: error.message };
         }
     }
 

@@ -33,9 +33,39 @@ export interface SceneSwitchGuardPlan {
     reason: string | null;
 }
 
+/**
+ * 直接保存场景副本时返回的最小结果。
+ * 不走系统保存窗口，因此由调用方显式提供目标资源路径。
+ */
+export interface DirectSceneSaveResult {
+    path: string;
+    uuid: string | null;
+}
+
 export function buildSceneAssetUrl(savePath: string, sceneName: string): string {
     const trimmed = savePath.trim().replace(/\/+$/, '');
     return trimmed.endsWith('.scene') ? trimmed : `${trimmed}/${sceneName}.scene`;
+}
+
+/**
+ * 规范化 save-scene-as 的目标路径。
+ * 这里强制要求传入明确的 `.scene` 资源路径，避免退回任何编辑器弹窗选择流程。
+ */
+export function normalizeSceneSaveAsPath(savePath: string): string {
+    const trimmed = String(savePath || '').trim();
+    if (!trimmed) {
+        throw new Error('path is required');
+    }
+
+    if (!trimmed.startsWith('db://')) {
+        throw new Error('path must be a db:// asset path');
+    }
+
+    if (!trimmed.endsWith('.scene')) {
+        throw new Error('path must end with .scene');
+    }
+
+    return trimmed;
 }
 
 /**
@@ -66,6 +96,40 @@ export function planSceneSwitchGuard(request: SceneSwitchGuardRequest): SceneSwi
         allowed: false,
         shouldSave: false,
         reason: `Current scene has unsaved changes. Pass autoSave=true to save before ${actionLabel}.`,
+    };
+}
+
+/**
+ * 用显式路径把当前场景序列化内容直接写回资源库。
+ * 设计目标是完全绕开 save-as-scene 对话框，同时仍让 Creator 重新识别该场景资源。
+ */
+export async function saveSceneAssetDirect(options: {
+    path: string;
+    serializedData: string;
+    saveAsset?: (url: string, content: string) => Promise<void>;
+    refreshAssetsAndWait?: (request: AssetDB.RefreshAssetsAndWaitRequest) => Promise<AssetDB.RefreshAssetsAndWaitResult>;
+    queryUuid?: (url: string) => Promise<string | null>;
+}): Promise<DirectSceneSaveResult> {
+    const path = normalizeSceneSaveAsPath(options.path);
+    const serializedData = String(options.serializedData || '').trim();
+    if (!serializedData) {
+        throw new Error('serialized scene data is empty');
+    }
+
+    const saveAsset = options.saveAsset ?? AssetDB.saveAsset;
+    const refreshAssetsAndWait = options.refreshAssetsAndWait ?? AssetDB.refreshAssetsAndWait;
+    const queryUuid = options.queryUuid ?? AssetDB.queryUuid;
+
+    // 先落盘再刷新资源库，确保 Creator 生成/更新对应 meta，而不是弹出人工选择窗口。
+    await saveAsset(path, serializedData);
+    await refreshAssetsAndWait({
+        urls: [path],
+        refreshParentFolders: true,
+    });
+
+    return {
+        path,
+        uuid: await queryUuid(path),
     };
 }
 
@@ -609,20 +673,33 @@ export class SceneTools implements ToolExecutor {
     }
 
     private async saveSceneAs(path: string): Promise<ToolResponse> {
-        return new Promise((resolve) => {
-            // save-as-scene API 不接受路径参数，会弹出对话框让用户选择
-            (Editor.Message.request as any)('scene', 'save-as-scene').then(() => {
-                resolve({
-                    success: true,
-                    data: {
-                        path: path,
-                        message: `Scene save-as dialog opened`
-                    }
-                });
-            }).catch((err: Error) => {
-                resolve({ success: false, error: err.message });
+        try {
+            const result = await Editor.Message.request('scene', 'execute-scene-script', {
+                name: 'cocos-mcp-server',
+                method: 'getCurrentSceneSerializedData',
+                args: [],
             });
-        });
+
+            if (!result?.success || typeof result?.data?.serializedData !== 'string') {
+                return { success: false, error: result?.error || 'Current scene serialized data is unavailable' };
+            }
+
+            const savedScene = await saveSceneAssetDirect({
+                path,
+                serializedData: result.data.serializedData,
+            });
+
+            return {
+                success: true,
+                data: {
+                    path: savedScene.path,
+                    uuid: savedScene.uuid,
+                    message: `Scene saved directly to ${savedScene.path}`,
+                }
+            };
+        } catch (err: any) {
+            return { success: false, error: err.message };
+        }
     }
 
     private async closeScene(autoSave = false): Promise<ToolResponse> {
