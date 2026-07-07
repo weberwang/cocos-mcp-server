@@ -32,6 +32,7 @@ const PUBLISH_ITEMS = [
   { source: 'node_modules' },
   { source: '@types' },
   { source: 'stdio-adapter/build' },
+  { source: 'support-packages' },
   { source: 'README.md' },
 ];
 

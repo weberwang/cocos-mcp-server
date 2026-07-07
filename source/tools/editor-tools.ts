@@ -4,6 +4,12 @@ import * as path from 'path';
 import * as zlib from 'zlib';
 
 import * as AssetDB from '../asset-db-wrapper';
+import {
+    CURRENT_EXTENSION_NAME,
+    DEFAULT_EXTENSION_SELF_RELOAD_DELAY_MS,
+    ensureReloadHelperExtension,
+    requestCurrentExtensionReload,
+} from '../reload-helper';
 import { saveSceneAssetDirect } from './scene-tools';
 import { ToolDefinition, ToolExecutor, ToolResponse } from '../types';
 
@@ -24,7 +30,10 @@ export interface ReloadExtensionDeps {
     getExtensionPath: (extensionName: string) => string | undefined;
     disableExtension: (extensionPath: string) => void;
     enableExtension: (extensionPath: string) => void;
-    scheduleReload?: (extensionPath: string) => void;
+    reloadCurrentExtension?: (
+        extensionName: string,
+        extensionPath: string,
+    ) => Promise<{ extensionName: string; extensionPath: string; scheduled: true }>;
 }
 
 export type CaptureScreenshotMode = 'editor' | 'scene-view' | 'game-view';
@@ -159,12 +168,9 @@ export interface RawPixelCaptureResult {
     cameraName?: string;
 }
 
-const CURRENT_EXTENSION_NAME = 'cocos-mcp-server';
-const CURRENT_EXTENSION_SELF_RELOAD_DELAY_MS = 150;
-
 /**
  * 通过 disable + enable 实现扩展重载。
- * 普通扩展直接同步切换；当前扩展则改为延迟调度，避免在响应返回前把自己卸载。
+ * 普通扩展直接同步切换；当前扩展则委托给辅助扩展延迟执行，避免在响应返回前把自己卸载。
  */
 export async function reloadExtensionByName(
     extensionName: string,
@@ -182,16 +188,11 @@ export async function reloadExtensionByName(
     }
 
     if (normalizedExtensionName === currentExtensionName) {
-        if (typeof deps.scheduleReload !== 'function') {
-            throw new Error('Self reload is unavailable because no deferred scheduler was provided');
+        if (typeof deps.reloadCurrentExtension !== 'function') {
+            throw new Error('Current extension reload is unavailable because no helper reload implementation was provided');
         }
 
-        deps.scheduleReload(extensionPath);
-        return {
-            extensionName: normalizedExtensionName,
-            extensionPath,
-            scheduled: true,
-        };
+        return deps.reloadCurrentExtension(normalizedExtensionName, extensionPath);
     }
 
     deps.disableExtension(extensionPath);
@@ -988,7 +989,7 @@ export class EditorTools implements ToolExecutor {
 
     /**
      * 重载指定扩展。
-     * 当前版本只允许重载其他扩展，避免请求执行过程中把自身卸载导致 MCP 调用中断。
+     * 当前扩展自身重载会委托给辅助扩展延迟执行，避免请求执行过程中把自身卸载导致 MCP 调用中断。
      */
     private async reloadExtension(extensionName: string): Promise<ToolResponse> {
         try {
@@ -996,16 +997,31 @@ export class EditorTools implements ToolExecutor {
                 getExtensionPath: (targetExtensionName: string) => Editor.Package.getPath(targetExtensionName),
                 disableExtension: (extensionPath: string) => Editor.Package.disable(extensionPath),
                 enableExtension: (extensionPath: string) => Editor.Package.enable(extensionPath),
-                scheduleReload: (extensionPath: string) => {
-                    // 当前扩展需要先把 MCP 响应返回给调用方，再延迟执行自重载，避免请求处理中断。
-                    setTimeout(() => {
-                        try {
-                            Editor.Package.disable(extensionPath);
-                            Editor.Package.enable(extensionPath);
-                        } catch (error: any) {
-                            console.error(`[MCP] Failed to self-reload extension '${CURRENT_EXTENSION_NAME}':`, error);
-                        }
-                    }, CURRENT_EXTENSION_SELF_RELOAD_DELAY_MS);
+                reloadCurrentExtension: async (targetExtensionName: string, extensionPath: string) => {
+                    const currentExtensionPath = Editor.Package.getPath(CURRENT_EXTENSION_NAME)
+                        || path.resolve(__dirname, '..', '..');
+
+                    ensureReloadHelperExtension(currentExtensionPath, {
+                        getExtensionPath: (helperExtensionName: string) => Editor.Package.getPath(helperExtensionName),
+                        registerExtension: (helperExtensionPath: string) => Editor.Package.register(helperExtensionPath),
+                        enableExtension: (helperExtensionPath: string) => Editor.Package.enable(helperExtensionPath),
+                    });
+
+                    return requestCurrentExtensionReload(
+                        targetExtensionName,
+                        extensionPath,
+                        {
+                            requestReload: async (helperExtensionName: string, helperTargetExtensionName: string, delayMs: number) => {
+                                return Editor.Message.request(
+                                    helperExtensionName,
+                                    'reloadExtension',
+                                    helperTargetExtensionName,
+                                    delayMs,
+                                );
+                            },
+                        },
+                        DEFAULT_EXTENSION_SELF_RELOAD_DELAY_MS,
+                    );
                 },
             });
 

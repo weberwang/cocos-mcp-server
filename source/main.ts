@@ -1,7 +1,9 @@
+import path from 'node:path';
 import { readSettings, saveSettings } from './settings';
 import { MCPServerSettings } from './types';
 import { AIClientTarget, ConfigLocation } from './client-config';
 import { loadRuntimeModules, RuntimeModules } from './runtime-modules';
+import { CURRENT_EXTENSION_NAME, ensureReloadHelperExtension } from './reload-helper';
 
 let runtimeModules: RuntimeModules | null = null;
 let mcpServer: InstanceType<RuntimeModules['MCPServer']> | null = null;
@@ -202,6 +204,20 @@ export const methods: { [key: string]: (...any: any) => any } = {
 
 export function load() {
     console.log('Cocos MCP Server extension loaded');
+
+    try {
+        const currentExtensionPath = Editor.Package.getPath(CURRENT_EXTENSION_NAME)
+            || path.resolve(__dirname, '..');
+
+        // 主扩展每次加载时都主动确保辅助扩展已注册并启用，避免后续自重载时缺少外部执行者。
+        ensureReloadHelperExtension(currentExtensionPath, {
+            getExtensionPath: (helperExtensionName: string) => Editor.Package.getPath(helperExtensionName),
+            registerExtension: (helperExtensionPath: string) => Editor.Package.register(helperExtensionPath),
+            enableExtension: (helperExtensionPath: string) => Editor.Package.enable(helperExtensionPath),
+        });
+    } catch (error) {
+        console.warn('[MCP] Failed to ensure reload helper extension:', error);
+    }
 
     runtimeModules = loadRuntimeModules();
     const { MCPServer, ToolManager } = runtimeModules;

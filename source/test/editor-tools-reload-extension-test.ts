@@ -6,7 +6,6 @@ import {
 
 async function run(): Promise<void> {
     const calls: string[] = [];
-    let scheduledReloadPath = '';
     const deps: ReloadExtensionDeps = {
         getExtensionPath: (extensionName: string) => {
             calls.push(`get:${extensionName}`);
@@ -18,9 +17,13 @@ async function run(): Promise<void> {
         enableExtension: (extensionPath: string) => {
             calls.push(`enable:${extensionPath}`);
         },
-        scheduleReload: (extensionPath: string) => {
-            scheduledReloadPath = extensionPath;
-            calls.push(`schedule:${extensionPath}`);
+        reloadCurrentExtension: async (extensionName: string, extensionPath: string) => {
+            calls.push(`helper:${extensionName}:${extensionPath}`);
+            return {
+                extensionName,
+                extensionPath,
+                scheduled: true,
+            };
         },
     };
 
@@ -51,12 +54,12 @@ async function run(): Promise<void> {
             extensionPath: 'D:/Extensions/cocos-mcp-server',
             scheduled: true,
         },
-        'should schedule self reload instead of rejecting the current extension',
+        'should delegate current extension reload to helper flow instead of direct disable/enable',
     );
     assert.equal(
-        scheduledReloadPath,
-        'D:/Extensions/cocos-mcp-server',
-        'should schedule the current extension path for deferred reload',
+        calls.includes('helper:cocos-mcp-server:D:/Extensions/cocos-mcp-server'),
+        true,
+        'should route current extension reload through helper implementation',
     );
 
     await assert.rejects(
@@ -71,10 +74,10 @@ async function run(): Promise<void> {
     await assert.rejects(
         () => reloadExtensionByName('cocos-mcp-server', 'cocos-mcp-server', {
             ...deps,
-            scheduleReload: undefined as any,
+            reloadCurrentExtension: undefined as any,
         }),
-        /self reload is unavailable/i,
-        'should reject when current extension reload lacks deferred scheduler support',
+        /current extension reload is unavailable/i,
+        'should reject when current extension helper reload support is unavailable',
     );
 }
 

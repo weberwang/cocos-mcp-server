@@ -1,6 +1,12 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { isAbsolute, join, sep } from 'path';
+import { extname, isAbsolute, join, sep } from 'path';
+import {
+    hasPackedSerializedSections,
+    isCompactSerializedDocument,
+} from './scene-serialization';
 module.paths.push(join(Editor.App.path, 'node_modules'));
+
+declare const EditorExtends: any;
 
 /**
  * 加载 Cocos 内置 scene 包的运行时模块。
@@ -390,6 +396,130 @@ function convertAssetToPlainSerializedJson(parsedSource: any): string {
     return JSON.stringify(serializedEntries, null, 2);
 }
 
+/**
+ * 根据资源扩展名推导期望的根资源类型。
+ * prefab/scene 修复时必须保证回写后的根类型正确，否则会把子资源误写回源文件。
+ */
+function getExpectedRootTypeForAssetPath(absolutePath: string): string | null {
+    const extension = extname(absolutePath).toLowerCase();
+    if (extension === '.prefab') {
+        return 'cc.Prefab';
+    }
+
+    if (extension === '.scene') {
+        return 'cc.SceneAsset';
+    }
+
+    return null;
+}
+
+/**
+ * 从编辑器序列化结果中提取根类型。
+ * prefab/scene 的标准输出是数组根，子资源常见为单对象根。
+ */
+function getSerializedRootType(serializedValue: any): string | null {
+    if (Array.isArray(serializedValue) && serializedValue[0] && typeof serializedValue[0] === 'object') {
+        return serializedValue[0].__type__ || null;
+    }
+
+    if (serializedValue && typeof serializedValue === 'object') {
+        return serializedValue.__type__ || null;
+    }
+
+    return null;
+}
+
+/**
+ * 构造缺脚本容错的 classFinder。
+ * section 探测阶段的目标只是找到真正的根资源，不能因为单个脚本缺失直接中断整条修复链路。
+ */
+function createMissingScriptClassFinder(ccRuntime: any) {
+    const missingReporter = typeof EditorExtends !== 'undefined' ? EditorExtends?.MissingReporter?.classInstance : null;
+    const missingScriptCtor = ccRuntime?.MissingScript || null;
+
+    if (!missingReporter && !missingScriptCtor) {
+        return null;
+    }
+
+    const classFinder = (type: string, data?: any, owner?: any, propName?: string) => {
+        const resolved = missingReporter?.classFinder?.(type, data, owner, propName) ?? null;
+        if (resolved) {
+            return resolved;
+        }
+        return missingScriptCtor ?? undefined;
+    };
+
+    if (missingReporter?.classFinder && typeof missingReporter.classFinder.onDereferenced === 'function') {
+        classFinder.onDereferenced = missingReporter.classFinder.onDereferenced;
+    }
+
+    return classFinder;
+}
+
+/**
+ * 用缺脚本容错模式反序列化资产文档。
+ * 这里优先保证“能探测根类型”，而不是要求所有依赖脚本都已经完整可用。
+ */
+function deserializeSerializedDocument(document: any, ccRuntime: any, deserialize: any): any {
+    if (typeof deserialize !== 'function') {
+        throw new Error('cc.deserialize is unavailable in current scene context');
+    }
+
+    const classFinder = createMissingScriptClassFinder(ccRuntime);
+    if (classFinder) {
+        return deserialize(document, undefined, { classFinder });
+    }
+
+    return deserialize(document);
+}
+
+/**
+ * 从 packed sections 中挑出当前文件真正对应的根资产文档。
+ * 同一个 prefab/scene 文件里可能同时打包了 SpriteFrame、SkeletonData 等子资源，不能默认取第一个 section。
+ */
+function resolvePackedSerializedDocument(parsedSource: any, absolutePath: string, ccRuntime: any, deserialize: any): any {
+    if (!hasPackedSerializedSections(parsedSource)) {
+        return parsedSource;
+    }
+
+    const expectedType = getExpectedRootTypeForAssetPath(absolutePath);
+    const sections = parsedSource[5].map((section: any[]) => [
+        parsedSource[0],
+        parsedSource[1],
+        parsedSource[2],
+        parsedSource[3],
+        parsedSource[4],
+        ...section,
+    ]);
+
+    if (!expectedType || typeof deserialize !== 'function') {
+        return sections[0];
+    }
+
+    for (const section of sections) {
+        try {
+            const asset = deserializeSerializedDocument(section, ccRuntime, deserialize);
+
+            // 直接看序列化根类型，比只看运行时类名更稳，能避免子资源被误认成目标根资产。
+            if (typeof EditorExtends !== 'undefined' && typeof EditorExtends.serialize === 'function') {
+                const serializedCandidate = EditorExtends.serialize(asset, { stringify: false });
+                if (getSerializedRootType(serializedCandidate) === expectedType) {
+                    return section;
+                }
+            }
+
+            const runtimeType = ccRuntime?.js?.getClassName?.(asset) ?? null;
+            if (runtimeType === expectedType) {
+                return section;
+            }
+        } catch {
+            continue;
+        }
+    }
+
+    return sections[0];
+}
+
 export const methods: { [key: string]: (...any: any) => any } = {
     /**
      * 供 scene-view 截图使用，返回 Canvas 节点矩形与当前 Scene 编辑相机信息。
@@ -536,10 +666,87 @@ export const methods: { [key: string]: (...any: any) => any } = {
      * 修复单个 prefab/scene 源文件，把紧凑格式回写成编辑器标准格式。
      */
     repairSerializedAsset(assetPath: string) {
+        return this.repairSerializedAssetToPlainJson(assetPath);
+    },
+
+    /**
+     * 只读检查 packed sections 的候选根类型。
+     * 先确认 section 选择是否正确，再决定是否真的回写源文件，避免再次误覆盖资源。
+     */
+    inspectSerializedAssetSections(assetPath: string) {
         try {
+            const absolutePath = resolveProjectAssetFilePath(assetPath);
+            const raw = readFileSync(absolutePath, 'utf8');
+            const parsed = JSON.parse(raw);
+            const cc = require('cc');
+            const { deserialize } = cc;
+            const expectedType = getExpectedRootTypeForAssetPath(absolutePath);
+            const compactRoot = isCompactSerializedDocument(parsed);
+            const packedSections = hasPackedSerializedSections(parsed);
+            const firstDataEntry = compactRoot ? parsed[5]?.[0] : null;
+            const detection = {
+                compactRoot,
+                packedSections,
+                p5Count: compactRoot ? parsed[5]?.length ?? 0 : null,
+                p5FirstEntryIsArray: Array.isArray(firstDataEntry),
+                p5FirstValueIsArray: Array.isArray(firstDataEntry?.[0]),
+                p5FirstValueType: Array.isArray(firstDataEntry) && firstDataEntry.length > 0
+                    ? typeof firstDataEntry[0]
+                    : null,
+            };
+
+            if (!packedSections) {
+                const asset = deserializeSerializedDocument(parsed, cc, deserialize);
+                const serializedCandidate = typeof EditorExtends !== 'undefined' && typeof EditorExtends.serialize === 'function'
+                    ? EditorExtends.serialize(asset, { stringify: false })
+                    : parsed;
+
+                return {
+                    success: true,
+                    data: {
+                        assetPath,
+                        absolutePath,
+                        expectedType,
+                        detection,
+                        packed: false,
+                        runtimeType: cc?.js?.getClassName?.(asset) ?? null,
+                        serializedRootType: getSerializedRootType(serializedCandidate),
+                    },
+                };
+            }
+
+            const sections = parsed[5].map((section: any[], index: number) => {
+                const normalizedSection = [parsed[0], parsed[1], parsed[2], parsed[3], parsed[4], ...section];
+                try {
+                    const asset = deserializeSerializedDocument(normalizedSection, cc, deserialize);
+                    const serializedCandidate = typeof EditorExtends !== 'undefined' && typeof EditorExtends.serialize === 'function'
+                        ? EditorExtends.serialize(asset, { stringify: false })
+                        : null;
+
+                    return {
+                        index,
+                        runtimeType: cc?.js?.getClassName?.(asset) ?? null,
+                        serializedRootType: getSerializedRootType(serializedCandidate),
+                    };
+                } catch (error: any) {
+                    return {
+                        index,
+                        error: error.message,
+                    };
+                }
+            });
+
             return {
                 success: true,
-                data: repairSerializedAssetFile(assetPath),
+                data: {
+                    assetPath,
+                    absolutePath,
+                    expectedType,
+                    detection,
+                    packed: true,
+                    sectionCount: sections.length,
+                    sections,
+                },
             };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -551,11 +758,36 @@ export const methods: { [key: string]: (...any: any) => any } = {
      * 当 Editor.serialize 不可用时，使用这条兜底路径。
      */
     repairSerializedAssetToPlainJson(assetPath: string) {
+        let strategy = 'unresolved';
         try {
             const absolutePath = resolveProjectAssetFilePath(assetPath);
             const raw = readFileSync(absolutePath, 'utf8');
             const parsed = JSON.parse(raw);
-            const serialized = convertAssetToPlainSerializedJson(parsed);
+            const cc = require('cc');
+            const { deserialize } = cc;
+            const normalizedSource = resolvePackedSerializedDocument(parsed, absolutePath, cc, deserialize);
+            let serialized: string;
+
+            if (typeof deserialize === 'function'
+                && typeof EditorExtends !== 'undefined'
+                && typeof EditorExtends.serialize === 'function') {
+                strategy = 'editor-extends';
+                const asset = deserializeSerializedDocument(normalizedSource, cc, deserialize);
+                const serializedByEditor = EditorExtends.serialize(asset, { stringify: false });
+                const expectedType = getExpectedRootTypeForAssetPath(absolutePath);
+                const actualRootType = getSerializedRootType(serializedByEditor);
+
+                if (expectedType && actualRootType !== expectedType) {
+                    throw new Error(`Serialized root type mismatch: expected ${expectedType}, got ${actualRootType || 'unknown'}`);
+                }
+
+                serialized = typeof serializedByEditor === 'string'
+                    ? serializedByEditor
+                    : JSON.stringify(serializedByEditor, null, 2);
+            } else {
+                strategy = 'manual-graph';
+                serialized = convertAssetToPlainSerializedJson(normalizedSource);
+            }
 
             JSON.parse(serialized);
             writeFileSync(absolutePath, serialized, 'utf8');
@@ -565,12 +797,18 @@ export const methods: { [key: string]: (...any: any) => any } = {
                 data: {
                     assetPath,
                     absolutePath,
+                    strategy,
                     bytesBefore: Buffer.byteLength(raw, 'utf8'),
                     bytesAfter: Buffer.byteLength(serialized, 'utf8'),
                 },
             };
         } catch (error: any) {
-            return { success: false, error: error.message };
+            return {
+                success: false,
+                error: error.message,
+                strategy,
+                stack: error.stack,
+            };
         }
     },
 
@@ -584,11 +822,8 @@ export const methods: { [key: string]: (...any: any) => any } = {
             }
 
             const results = assetPaths.map((assetPath: string) => {
-                try {
-                    return { assetPath, success: true, data: repairSerializedAssetFile(assetPath) };
-                } catch (error: any) {
-                    return { assetPath, success: false, error: error.message };
-                }
+                const result = this.repairSerializedAssetToPlainJson(assetPath);
+                return { assetPath, ...result };
             });
 
             return {
