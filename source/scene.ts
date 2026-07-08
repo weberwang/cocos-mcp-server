@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync } from 'fs';
-import { extname, isAbsolute, join, sep } from 'path';
+import { readFileSync, readdirSync, writeFileSync } from 'fs';
+import { extname, isAbsolute, join, relative, sep } from 'path';
 import {
     hasPackedSerializedSections,
     isCompactSerializedDocument,
@@ -835,6 +835,46 @@ export const methods: { [key: string]: (...any: any) => any } = {
                     results,
                 },
             };
+        } catch (error: any) {
+            return { success: false, error: error.message };
+        }
+    },
+
+    /**
+     * 按目录批量修复 compact prefab/scene，避免超长参数列表阻塞大批次资源回写。
+     */
+    repairSerializedAssetsInFolder(folderPath: string, extensions: string[] = ['.prefab', '.scene'], recursive: boolean = true) {
+        try {
+            const absoluteFolderPath = resolveProjectAssetFilePath(folderPath);
+            const normalizedExtensions = Array.isArray(extensions) && extensions.length > 0
+                ? extensions.map((extension) => typeof extension === 'string' ? extension.toLowerCase() : '').filter(Boolean)
+                : ['.prefab', '.scene'];
+            const projectAssetsPath = join(Editor.Project.path, 'assets');
+            const assetPaths: string[] = [];
+
+            const visitFolder = (currentFolderPath: string) => {
+                const entries = readdirSync(currentFolderPath, { withFileTypes: true });
+                for (const entry of entries) {
+                    const entryPath = join(currentFolderPath, entry.name);
+                    if (entry.isDirectory()) {
+                        if (recursive) {
+                            visitFolder(entryPath);
+                        }
+                        continue;
+                    }
+
+                    const extension = extname(entry.name).toLowerCase();
+                    if (!normalizedExtensions.includes(extension)) {
+                        continue;
+                    }
+
+                    const relativeAssetPath = relative(projectAssetsPath, entryPath).replace(/\\/g, '/');
+                    assetPaths.push(`db://assets/${relativeAssetPath}`);
+                }
+            };
+
+            visitFolder(absoluteFolderPath);
+            return this.repairSerializedAssets(assetPaths);
         } catch (error: any) {
             return { success: false, error: error.message };
         }
