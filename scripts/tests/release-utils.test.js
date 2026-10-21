@@ -68,6 +68,8 @@ test('PUBLISH_ITEMS 包含约定 source 顺序', () => {
       'node_modules',
       '@types',
       'stdio-adapter/build',
+      'stdio-adapter/package.json',
+      'support-packages',
       'README.md',
     ],
   );

@@ -51,7 +51,9 @@ cocos-mcp-server/
 
 ## Installation
 
-This README now uses a **remote-install-only** workflow. The installer downloads `plugin-package/` from the repository's default GitHub branch and installs it into the target Cocos Creator project's `extensions/cocos-mcp-server`.
+No manual clone is needed. The installer downloads source from the repository's default GitHub branch, installs dependencies and builds a complete `plugin-package/` in a temporary directory, then installs it into the target Cocos Creator project's `extensions/cocos-mcp-server`.
+
+Install **Node.js and npm** first. Use **PowerShell 7 (`pwsh`)** on Windows; macOS / Linux also require `curl` and `unzip`. Installation needs access to GitHub and the npm registry.
 
 By default, the target project is the **current working directory**, so the plugin is installed at:
 
@@ -61,7 +63,7 @@ By default, the target project is the **current working directory**, so the plug
 
 If you want to install into a different project, override the target project root with `COCOS_PROJECT_PATH`.
 
-### PowerShell
+### PowerShell 7
 
 Run this from the target Cocos Creator project root:
 
@@ -87,14 +89,15 @@ curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/ins
 Install into a specific project directory:
 
 ```bash
-COCOS_PROJECT_PATH=/path/to/AnotherGame curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | COCOS_PROJECT_PATH="/path/to/AnotherGame" sh
 ```
 
 ### Notes
 
 - Remote install places the plugin under `extensions/cocos-mcp-server`
 - If that directory already exists, the installer swaps directories atomically instead of overwriting in place
-- If you are developing this source repository, `npm install`, `npm run build`, and the `stdio-adapter` build steps are still repository-development tasks, not end-user installation steps
+- Dependencies and builds are prepared automatically in a temporary directory; a failure leaves the existing plugin intact
+- Normal installation does not require manually running `npm install`, `npm run build`, or building `stdio-adapter`
 
 ## Source Repository Maintenance Commands
 

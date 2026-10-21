@@ -51,7 +51,9 @@ cocos-mcp-server/
 
 ## 安装
 
-当前 README 统一使用**远程安装口径**。安装脚本会从 GitHub 默认分支下载分发包里的 `plugin-package/`，并安装到目标 Creator 项目的 `extensions/cocos-mcp-server`。
+无需手动克隆仓库。远程安装脚本会从 GitHub 默认分支下载源码，在临时目录中安装依赖并构建完整的 `plugin-package/`，然后安装到目标 Creator 项目的 `extensions/cocos-mcp-server`。
+
+安装前请准备 **Node.js 和 npm**；PowerShell 使用 **PowerShell 7（`pwsh`）**，macOS / Linux 还需要 `curl`、`unzip`。安装过程中需要访问 GitHub 和 npm registry。
 
 默认情况下，目标项目目录就是你执行命令时的**当前目录**，最终安装位置如下：
 
@@ -61,7 +63,7 @@ cocos-mcp-server/
 
 如果要安装到别的项目目录，可通过环境变量 `COCOS_PROJECT_PATH` 覆盖目标项目根目录。
 
-### PowerShell
+### PowerShell 7
 
 在目标 Cocos Creator 项目根目录执行：
 
@@ -87,14 +89,15 @@ curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/ins
 安装到指定项目目录：
 
 ```bash
-COCOS_PROJECT_PATH=/path/to/AnotherGame curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/weberwang/cocos-mcp-server/main/install.sh | COCOS_PROJECT_PATH="/path/to/AnotherGame" sh
 ```
 
 ### 补充说明
 
 - 远程安装默认会把插件放到目标项目的 `extensions/cocos-mcp-server`
 - 已存在同名插件目录时，安装脚本会做目录切换，避免直接覆盖中断后留下半安装状态
-- 如果你是在**源码仓库开发**，`npm install`、`npm run build`、`stdio-adapter` 构建步骤仍只用于本仓库开发，不属于普通安装流程
+- 依赖安装和编译均在临时目录中自动完成，失败时不会替换已有插件
+- 普通安装无需手动执行 `npm install`、`npm run build` 或单独构建 `stdio-adapter`
 
 ## 源码仓库维护命令
 
@@ -470,8 +473,3 @@ npm run build
 本插件供 Cocos Creator 项目使用，源码一并提供，可用于学习、交流和二次开发优化。
 
 未经授权，当前项目代码及其衍生代码不得用于商用或转售。如需商用，请联系作者。
-
-## 联系方式
-
-## 联系我加入群
-<img alt="image" src="https://github.com/user-attachments/assets/a276682c-4586-480c-90e5-6db132e89e0f" width="400" height="400" />

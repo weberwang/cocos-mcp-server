@@ -32,6 +32,8 @@ const PUBLISH_ITEMS = [
   { source: 'node_modules' },
   { source: '@types' },
   { source: 'stdio-adapter/build' },
+  // 适配器产物使用 ES 模块，安装包必须保留其 type: module 声明。
+  { source: 'stdio-adapter/package.json' },
   { source: 'support-packages' },
   { source: 'README.md' },
 ];

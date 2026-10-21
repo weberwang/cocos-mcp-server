@@ -17,6 +17,12 @@ function createRepoFixture(repoRoot) {
   fs.mkdirSync(path.join(repoRoot, 'node_modules'), { recursive: true });
   fs.mkdirSync(path.join(repoRoot, '@types', 'schema', 'package'), { recursive: true });
   fs.mkdirSync(path.join(repoRoot, 'stdio-adapter', 'build'), { recursive: true });
+  // 辅助扩展属于现有分发白名单，夹具也必须包含它才能验证完整打包流程。
+  fs.mkdirSync(path.join(repoRoot, 'support-packages', 'cocos-mcp-server-helper'), { recursive: true });
+  fs.writeFileSync(
+    path.join(repoRoot, 'support-packages', 'cocos-mcp-server-helper', 'main.js'),
+    'module.exports = {};',
+  );
 
   fs.writeFileSync(
     path.join(repoRoot, 'package.json'),
@@ -24,6 +30,10 @@ function createRepoFixture(repoRoot) {
   );
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# test');
   fs.writeFileSync(path.join(repoRoot, 'tsconfig.json'), '{}');
+  fs.writeFileSync(
+    path.join(repoRoot, 'stdio-adapter', 'package.json'),
+    JSON.stringify({ name: 'cocos-mcp-stdio', type: 'module' }),
+  );
   fs.writeFileSync(path.join(repoRoot, 'dist', 'main.js'), 'module.exports = {};');
   fs.writeFileSync(path.join(repoRoot, 'static', 'template.html'), '<html></html>');
   fs.writeFileSync(
@@ -216,6 +226,14 @@ test('packageRemoteRelease 刷新 plugin-package 并复制核心产物', () => {
   assert.equal(fs.existsSync(path.join(remoteDir, 'legacy.txt')), false);
   assert.equal(fs.existsSync(path.join(remoteDir, 'dist', 'main.js')), true);
   assert.equal(fs.existsSync(path.join(remoteDir, 'stdio-adapter', 'build', 'index.js')), true);
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(remoteDir, 'stdio-adapter', 'package.json'), 'utf8')).type,
+    'module',
+  );
+  assert.equal(
+    fs.existsSync(path.join(remoteDir, 'support-packages', 'cocos-mcp-server-helper', 'main.js')),
+    true,
+  );
   assert.equal(
     JSON.parse(fs.readFileSync(path.join(remoteDir, 'package.json'), 'utf8')).scripts,
     undefined,

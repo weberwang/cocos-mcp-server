@@ -131,7 +131,25 @@ function Replace-PluginDirectoryAtomically {
     }
 }
 
-# 函数：从 GitHub 默认分支安装 plugin-package 到 Creator 项目 extensions 目录。
+# 函数：在临时源码目录构建完整分发包，避免安装 GitHub 中缺少产物的目录。
+function Initialize-RemotePackage {
+    param(
+        [string]$ArchiveRoot
+    )
+
+    $prepareScript = Join-Path $ArchiveRoot 'scripts/prepare-remote-install.js'
+    if (-not (Test-Path -LiteralPath $prepareScript -PathType Leaf)) {
+        throw "远程压缩包缺少安装准备脚本: $prepareScript"
+    }
+
+    & node $prepareScript
+    # PowerShell 不会把原生命令的非零退出码自动转换为终止错误，必须显式阻止后续替换。
+    if ($LASTEXITCODE -ne 0) {
+        throw "构建远程安装包失败，退出码: $LASTEXITCODE"
+    }
+}
+
+# 函数：从 GitHub 默认分支构建并安装 plugin-package 到 Creator 项目 extensions 目录。
 function Install-PluginPackage {
     param(
         [string]$Owner,
@@ -155,6 +173,7 @@ function Install-PluginPackage {
 
         # GitHub 源码 zip 顶层目录名随分支变化，因此需要先确认唯一顶层目录。
         $archiveDir = Resolve-ArchiveRoot -ExtractRoot $extractRoot -ZipUrl $zipUrl
+        Initialize-RemotePackage -ArchiveRoot $archiveDir.FullName
 
         $sourceDir = Join-Path $archiveDir.FullName 'plugin-package'
         $sourceItem = Get-Item -LiteralPath $sourceDir -ErrorAction SilentlyContinue
@@ -178,6 +197,11 @@ function Install-PluginPackage {
 
 try {
     $targetProjectPath = Resolve-TargetProjectPath -InputPath $ProjectPath
+    foreach ($commandName in @('node', 'npm')) {
+        if (-not (Get-Command $commandName -CommandType Application -ErrorAction SilentlyContinue)) {
+            throw "缺少依赖命令: $commandName，请先安装 Node.js 和 npm"
+        }
+    }
     Install-PluginPackage -Owner $RepoOwner -Repo $RepoName -TargetProjectPath $targetProjectPath
 } catch {
     $message = $_.Exception.Message

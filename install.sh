@@ -32,6 +32,8 @@ require_command() {
 
 # 函数：统一做环境预检，保持报错前缀和依赖集合一致。
 check_dependencies() {
+  require_command "node"
+  require_command "npm"
   require_command "curl"
   require_command "unzip"
   require_command "find"
@@ -42,7 +44,8 @@ check_dependencies() {
 # 函数：恢复安装切换阶段的中间态，尽量避免中断后正式目录丢失。
 restore_install_state() {
   if [ "${INSTALL_SWITCH_ACTIVE}" -ne 1 ]; then
-    return
+    # EXIT 陷阱中显式返回成功，避免继承失败状态后被 set -e 中断，跳过下载目录清理。
+    return 0
   fi
 
   if [ -n "${INSTALL_NEW_DIR}" ] && [ -d "${INSTALL_NEW_DIR}" ]; then
@@ -162,7 +165,16 @@ replace_plugin_directory_atomically() {
   fail "切换插件目录失败: ${target_dir}"
 }
 
-# 函数：从默认分支 zip 中提取 plugin-package 并安装到 Creator 项目 extensions 目录。
+# 函数：在临时源码目录构建完整分发包，构建失败时保持已有插件不变。
+prepare_remote_package() {
+  archive_root="$1"
+  prepare_script="${archive_root}/scripts/prepare-remote-install.js"
+  [ -f "${prepare_script}" ] || fail "远程压缩包缺少安装准备脚本: ${prepare_script}"
+
+  node "${prepare_script}" || fail "构建远程安装包失败"
+}
+
+# 函数：从默认分支 zip 构建 plugin-package 并安装到 Creator 项目 extensions 目录。
 install_plugin_package() {
   target_project_path="$1"
   branch="$(get_default_branch)"
@@ -183,6 +195,7 @@ install_plugin_package() {
   unzip -q "${zip_path}" -d "${extract_root}" || fail "解压默认分支压缩包失败: ${zip_path}"
 
   archive_dir="$(resolve_archive_root "${extract_root}")"
+  prepare_remote_package "${archive_dir}"
   source_dir="${archive_dir}/plugin-package"
   [ -d "${source_dir}" ] || fail "远程压缩包缺少 plugin-package 目录: ${source_dir}"
 
