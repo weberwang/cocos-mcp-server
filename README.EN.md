@@ -4,7 +4,7 @@
 
 An MCP (Model Context Protocol) extension for Cocos Creator `3.8.6+`. It runs a local MCP service inside the editor and exposes scene, node, component, asset, prefab, debugging, and editor workflows to AI clients.
 
-Current repository version: `v1.5.1`
+Current repository version: `v1.5.2`
 
 ## What This Repository Is
 

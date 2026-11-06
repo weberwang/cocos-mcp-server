@@ -22,7 +22,7 @@ import { ManageTools, getEnabledCategories } from './tools/tool-groups';
 import { MaterialTools } from './tools/material-tools';
 
 // 统一维护插件对外暴露的版本号，避免状态接口、能力接口和握手信息各自漂移。
-const MCP_SERVER_VERSION = '1.5.1';
+const MCP_SERVER_VERSION = '1.5.2';
 
 export class MCPServer {
     private settings: MCPServerSettings;

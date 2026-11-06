@@ -1,8 +1,11 @@
 import { ToolDefinition, ToolResponse, ToolExecutor, PrefabInfo } from '../types';
 import * as AssetDB from '../asset-db-wrapper';
 import { getPageArgs, paginate } from '../paging';
+import { updatePrefabAsset } from './prefab-update';
 
+/** 提供预制体资源与场景实例的 MCP 操作入口。 */
 export class PrefabTools implements ToolExecutor {
+    /** 声明预制体工具及调用参数约束。 */
     getTools(): ToolDefinition[] {
         return [
             {
@@ -84,7 +87,7 @@ export class PrefabTools implements ToolExecutor {
             },
             {
                 name: 'update_prefab',
-                description: 'Update an existing prefab',
+                description: 'Save changes from a prefab instance root to its associated prefab asset',
                 inputSchema: {
                     type: 'object',
                     properties: {
@@ -94,7 +97,7 @@ export class PrefabTools implements ToolExecutor {
                         },
                         nodeUuid: {
                             type: 'string',
-                            description: 'Node UUID with changes'
+                            description: 'Prefab instance root node UUID; its asset must match prefabPath'
                         }
                     },
                     required: ['prefabPath', 'nodeUuid']
@@ -185,6 +188,7 @@ export class PrefabTools implements ToolExecutor {
         ];
     }
 
+    /** 将 MCP 请求分派到对应的预制体操作。 */
     async execute(toolName: string, args: any): Promise<ToolResponse> {
         switch (toolName) {
             case 'get_prefab_list':
@@ -200,7 +204,7 @@ export class PrefabTools implements ToolExecutor {
             case 'create_prefab':
                 return await this.createPrefab(args);
             case 'update_prefab':
-                return await this.updatePrefab(args.prefabPath, args.nodeUuid);
+                return await updatePrefabAsset(args.prefabPath, args.nodeUuid);
             case 'revert_prefab':
                 return await this.revertPrefab(args.nodeUuid);
             case 'get_prefab_info':
@@ -1310,28 +1314,6 @@ export class PrefabTools implements ToolExecutor {
             };
 
             trySave(0);
-        });
-    }
-
-    private async updatePrefab(prefabPath: string, nodeUuid: string): Promise<ToolResponse> {
-        return new Promise((resolve) => {
-            AssetDB.queryAssetInfo(prefabPath).then((assetInfo: any) => {
-                if (!assetInfo) {
-                    throw new Error('Prefab not found');
-                }
-
-                return Editor.Message.request('scene', 'apply-prefab', {
-                    node: nodeUuid,
-                    prefab: assetInfo.uuid
-                });
-            }).then(() => {
-                resolve({
-                    success: true,
-                    message: 'Prefab updated successfully'
-                });
-            }).catch((err: Error) => {
-                resolve({ success: false, error: err.message });
-            });
         });
     }
 
